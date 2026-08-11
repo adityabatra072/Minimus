@@ -47,6 +47,11 @@ target 'mobile' do
           bc.build_settings['SWIFT_VERSION'] = '5.0'
           bc.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
         end
+        # Xcode 26 sandboxes user script phases by default, which blocks
+        # CocoaPods' copy-xcframeworks phase — the vendored librac_commons.a
+        # device slice never reaches XCFrameworkIntermediates and the link
+        # fails. Same setting RN templates ship with.
+        bc.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
       end
     end
   end
