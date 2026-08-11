@@ -1,0 +1,80 @@
+name: ios-build
+
+# Builds an UNSIGNED iOS IPA of the Minimus app on a macOS runner.
+# Dev machine is Windows + free Apple ID: signing happens locally via
+# Sideloadly (re-signs the IPA over USB), so CI never touches certificates.
+# Release configuration embeds the JS bundle — the installed app needs no
+# Metro server.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/ios/**'
+      - 'apps/mobile/package.json'
+      - '.github/workflows/ios-build.yml'
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Pod install
+        working-directory: apps/mobile/ios
+        run: |
+          pod install --repo-update
+
+      - name: Build (Release, unsigned)
+        working-directory: apps/mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace mobile.xcworkspace \
+            -scheme mobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build | xcbeautify --renderer github-actions || \
+          xcodebuild \
+            -workspace mobile.xcworkspace \
+            -scheme mobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        working-directory: apps/mobile/ios
+        run: |
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
+          test -n "$APP_PATH" || { echo "no .app produced"; exit 1; }
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry minimus-unsigned.ipa Payload
+          ls -la minimus-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minimus-unsigned-ipa
+          path: apps/mobile/ios/minimus-unsigned.ipa
+          retention-days: 14
