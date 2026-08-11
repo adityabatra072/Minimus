@@ -7,7 +7,7 @@ dist/
 models/
 
 # local binary tooling (llama-server etc.)
-tools/
+/tools/
 
 # env & secrets
 .env
