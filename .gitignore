@@ -1,0 +1,21 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local model weights (multi-GB GGUFs)
+models/
+
+# env & secrets
+.env
+.env.*
+*.keystore
+*.mobileprovision
+*.p12
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# eval artifacts
+packages/eval/results/

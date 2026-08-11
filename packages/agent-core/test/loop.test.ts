@@ -1,0 +1,200 @@
+import { describe, expect, it } from 'vitest';
+import { AgentLoop } from '../src/loop.js';
+import { ToolRegistry } from '../src/tools.js';
+import { MockAdapter } from '../src/adapters/mock.js';
+import type { AgentEvent, RunCheckpoint } from '../src/types.js';
+
+function makeTools() {
+  const tools = new ToolRegistry();
+  const log: string[] = [];
+  tools.register({
+    name: 'flashlight',
+    description: 'Turn the flashlight on or off',
+    parameters: {
+      type: 'object',
+      properties: { on: { type: 'boolean', description: 'true = on' } },
+      required: ['on'],
+    },
+    execute: async (args) => {
+      log.push(`flashlight:${args['on']}`);
+      return { ok: true, state: args['on'] ? 'on' : 'off' };
+    },
+  });
+  tools.register({
+    name: 'send_email',
+    description: 'Send an email',
+    parameters: {
+      type: 'object',
+      properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } },
+      required: ['to', 'body'],
+    },
+    needsApproval: true,
+    execute: async () => {
+      log.push('email:sent');
+      return { ok: true };
+    },
+  });
+  return { tools, log };
+}
+
+async function collect(gen: AsyncGenerator<AgentEvent>): Promise<AgentEvent[]> {
+  const events: AgentEvent[] = [];
+  for await (const e of gen) events.push(e);
+  return events;
+}
+
+function finished(events: AgentEvent[]) {
+  const last = events.at(-1);
+  if (last?.type !== 'run_finished') throw new Error('run did not finish');
+  return last;
+}
+
+describe('AgentLoop', () => {
+  it('runs tool call → result → final answer', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      "[flashlight(on=True)]",
+      'Done — flashlight is on.',
+    ]);
+    const events = await collect(new AgentLoop().run('turn on the flashlight', { adapter, tools }));
+    expect(log).toEqual(['flashlight:true']);
+    expect(finished(events).reason).toBe('completed');
+    expect(finished(events).finalText).toBe('Done — flashlight is on.');
+    const toolEvents = events.filter((e) => e.type === 'tool_call_finished');
+    expect(toolEvents).toHaveLength(1);
+  });
+
+  it('terminates immediately on plain text', async () => {
+    const { tools } = makeTools();
+    const adapter = new MockAdapter(['Paris is the capital of France.']);
+    const events = await collect(new AgentLoop().run('capital of france?', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(events.filter((e) => e.type === 'turn_started')).toHaveLength(1);
+  });
+
+  it('retries with a nudge on unknown tool, then succeeds', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      '[torch(on=True)]', // unknown tool → validation error + nudge
+      '[flashlight(on=True)]',
+      'On now.',
+    ]);
+    const events = await collect(new AgentLoop().run('flashlight please', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(log).toEqual(['flashlight:true']);
+    const retries = events.filter((e) => e.type === 'parse_retry');
+    expect(retries).toHaveLength(1);
+    // The nudge must be visible to the model on the next request.
+    const lastRequest = adapter.requests.at(-1)!;
+    expect(JSON.stringify(lastRequest)).toContain('Unknown tool');
+  });
+
+  it('fails the run after exhausting validation retries', async () => {
+    const { tools } = makeTools();
+    const adapter = new MockAdapter(['[nope(x=1)]', '[nope(x=1)]', '[nope(x=1)]', '[nope(x=1)]']);
+    const events = await collect(new AgentLoop().run('do it', { adapter, tools }));
+    expect(finished(events).reason).toBe('error');
+  });
+
+  it('pauses for approval and executes on approve', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      '<tool_call>{"name": "send_email", "arguments": {"to": "a@b.c", "body": "hi"}}</tool_call>',
+      'Sent.',
+    ]);
+    const approvals: string[] = [];
+    const events = await collect(
+      new AgentLoop().run('email a@b.c saying hi', {
+        adapter,
+        tools,
+        approvals: async (req) => {
+          approvals.push(req.call.name);
+          return true;
+        },
+      }),
+    );
+    expect(approvals).toEqual(['send_email']);
+    expect(log).toEqual(['email:sent']);
+    expect(finished(events).reason).toBe('completed');
+  });
+
+  it('records denial and lets the model continue', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      '<tool_call>{"name": "send_email", "arguments": {"to": "a@b.c", "body": "hi"}}</tool_call>',
+      "Okay, I won't send it.",
+    ]);
+    const events = await collect(
+      new AgentLoop().run('email someone', {
+        adapter,
+        tools,
+        approvals: async () => false,
+      }),
+    );
+    expect(log).toEqual([]);
+    expect(finished(events).reason).toBe('completed');
+    expect(finished(events).finalText).toContain("won't send");
+  });
+
+  it('checkpoints after every step and can resume', async () => {
+    const { tools } = makeTools();
+    const checkpoints: RunCheckpoint[] = [];
+    const adapter = new MockAdapter(['[flashlight(on=True)]', 'Done.']);
+    await collect(
+      new AgentLoop().run('flashlight on', {
+        adapter,
+        tools,
+        onCheckpoint: (cp) => {
+          checkpoints.push(cp);
+        },
+      }),
+    );
+    expect(checkpoints.length).toBeGreaterThanOrEqual(2);
+
+    // Resume from the first checkpoint (after tool exec, before final answer).
+    const resumeAdapter = new MockAdapter(['All done (resumed).']);
+    const events = await collect(
+      new AgentLoop().run('', {
+        adapter: resumeAdapter,
+        tools,
+        resumeFrom: checkpoints[0]!,
+      }),
+    );
+    expect(finished(events).reason).toBe('completed');
+    expect(finished(events).finalText).toContain('resumed');
+  });
+
+  it('caps oversized tool results', async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: 'web_search',
+      description: 'search',
+      parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      execute: async () => ({ results: 'x'.repeat(50_000) }),
+    });
+    const adapter = new MockAdapter(['[web_search(query="q")]', 'Summarized.']);
+    const events = await collect(new AgentLoop().run('search q', { adapter, tools }));
+    const toolFinished = events.find((e) => e.type === 'tool_call_finished');
+    if (toolFinished?.type !== 'tool_call_finished') throw new Error('missing tool event');
+    expect(toolFinished.result.length).toBeLessThan(7000);
+    expect(toolFinished.result).toContain('[truncated');
+  });
+
+  it('stops at max turns', async () => {
+    const { tools } = makeTools();
+    // Model loops forever calling the same tool.
+    const adapter = new MockAdapter(Array(20).fill('[flashlight(on=True)]'));
+    const events = await collect(new AgentLoop().run('loop forever', { adapter, tools }));
+    expect(finished(events).reason).toBe('max_turns');
+  });
+
+  it('one-tool-per-turn policy keeps only the first of parallel calls', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      '[flashlight(on=True), flashlight(on=False)]',
+      'Done.',
+    ]);
+    await collect(new AgentLoop().run('toggle stuff', { adapter, tools }));
+    expect(log).toEqual(['flashlight:true']);
+  });
+});

@@ -1,0 +1,22 @@
+{
+  "name": "@minimus/agent-core",
+  "version": "0.1.0",
+  "description": "Pure-TS agent harness: loop, tool registry, model adapters, policies. No React Native imports — runs anywhere Node runs.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit false --emitDeclarationOnly",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  }
+}
