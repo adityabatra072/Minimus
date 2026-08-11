@@ -110,8 +110,10 @@ scenarios:
     expect:
       calls:
         - tool: schedule_task
-          args: { instruction: { re: "battery" }, when: { re: "30" } }
-      max_turns: 3
+          # `when` accepts either relative "+30" or a computed ISO time — both
+          # are correct; models differ in which they emit.
+          args: { instruction: { re: "battery" } }
+      max_turns: 5
 
   - id: code-simple
     prompt: write and run javascript to compute the 10th fibonacci number

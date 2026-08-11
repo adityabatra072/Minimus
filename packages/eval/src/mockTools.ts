@@ -258,7 +258,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     description:
       'Schedule the assistant itself to act later: at the given time it wakes up with ALL tools (battery, web, notifications, music, …) and performs the instruction.',
     usageHint:
-      '"in N minutes / at TIME, do or check something" → schedule_task(instruction, when="+N" or ISO time). Never use set_timer or create_reminder for tasks that require checking or doing something.',
+      'schedule_task is ONLY for deferred assistant actions ("in 30 min check my battery", "at 6pm search X"). Wake-up alarms → set_alarm. Countdown timers → set_timer. Fixed-message reminders → create_reminder.',
     parameters: {
       type: 'object',
       properties: {

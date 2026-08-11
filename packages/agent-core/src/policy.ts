@@ -35,7 +35,7 @@ export const DEFAULT_POLICIES: ModelPolicy[] = [
     topP: 0.95,
     thinking: true,
     contextWindowTokens: 32768,
-    maxOutputTokens: 1280,
+    maxOutputTokens: 2048,
     toolResultCharCap: 6000,
   },
   {

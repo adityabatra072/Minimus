@@ -1,0 +1,25 @@
+// Monorepo-aware: node_modules are hoisted to the workspace root by npm
+// workspaces, so resolve the RN gradle plugin through Node instead of a
+// hardcoded relative path. pluginManagement must stay the first statement.
+pluginManagement {
+  includeBuild(
+    new File(
+      providers.exec {
+        workingDir(rootDir)
+        commandLine("node", "--print", "require.resolve('@react-native/gradle-plugin/package.json')")
+      }.standardOutput.asText.get().trim()
+    ).getParentFile().getAbsolutePath()
+  )
+}
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'mobile'
+include ':app'
+includeBuild(
+  new File(
+    providers.exec {
+      workingDir(rootDir)
+      commandLine("node", "--print", "require.resolve('@react-native/gradle-plugin/package.json')")
+    }.standardOutput.asText.get().trim()
+  ).getParentFile().getAbsolutePath()
+)

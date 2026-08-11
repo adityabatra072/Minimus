@@ -11,12 +11,14 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "eval": "npm run start -w @minimus/eval --"
+    "eval": "npm run start -w @minimus/eval --",
+    "postinstall": "patch-package && node scripts/fix-runanywhere-windows.mjs"
   },
   "devDependencies": {
+    "patch-package": "^8.0.1",
+    "prettier": "^3.6.2",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4",
-    "prettier": "^3.6.2"
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=22"

@@ -22,3 +22,8 @@ Thumbs.db
 
 # eval artifacts
 packages/eval/results/
+
+# build/session logs
+logs/
+hs_err_pid*.log
+replay_pid*.log
