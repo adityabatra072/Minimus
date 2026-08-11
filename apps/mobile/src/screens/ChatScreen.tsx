@@ -12,7 +12,7 @@ import {
 import { AgentLoop, type AgentEvent, type ToolCall } from '@minimus/agent-core';
 import { LocalAdapter } from '../services/LocalAdapter';
 import { buildToolRegistry } from '../tools';
-import { DEFAULT_MODEL_ID } from '../services/catalog';
+import { useModelStore } from '../stores/modelStore';
 import { verbFor, resultFor } from '../services/humanize';
 import { overlay } from '../services/overlay';
 import { ActionRail, type Operation } from '../components/ActionRail';
@@ -74,7 +74,12 @@ function approvalSummary(call: ToolCall): { title: string; detail: string } {
   }
 }
 
-export default function ChatScreen(): React.JSX.Element {
+export default function ChatScreen({
+  onOpenModels,
+}: {
+  onOpenModels?: () => void;
+}): React.JSX.Element {
+  const activeModelId = useModelStore((s) => s.activeModelId);
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -97,7 +102,7 @@ export default function ChatScreen(): React.JSX.Element {
       setItems((prev) => [...prev, { kind: 'user', id: nextId(), text: prompt.trim() }]);
       scrollDown();
 
-      const adapter = new LocalAdapter(DEFAULT_MODEL_ID);
+      const adapter = new LocalAdapter(activeModelId);
       const loop = new AgentLoop();
 
       let railId: string | null = null;
@@ -251,7 +256,7 @@ export default function ChatScreen(): React.JSX.Element {
         }
       }
     },
-    [running],
+    [running, activeModelId],
   );
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -261,7 +266,7 @@ export default function ChatScreen(): React.JSX.Element {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Header />
+      <Header onOpenModels={onOpenModels} />
       {items.length === 0 ? (
         <EmptyState onPick={(s) => void run(s)} />
       ) : (
@@ -286,7 +291,9 @@ export default function ChatScreen(): React.JSX.Element {
   );
 }
 
-function Header(): React.JSX.Element {
+function Header({ onOpenModels }: { onOpenModels?: () => void }): React.JSX.Element {
+  const activeModelId = useModelStore((s) => s.activeModelId);
+  const modelLabel = activeModelId.replace(/-(ud-)?q\d.*$/i, '').replace(/-/g, ' ');
   const [bubbleOn, setBubbleOn] = useState(false);
   const toggleBubble = useCallback(async () => {
     try {
@@ -317,10 +324,10 @@ function Header(): React.JSX.Element {
             <View style={[styles.bubbleGlyph, bubbleOn && styles.bubbleGlyphOn]} />
           </TouchableOpacity>
         ) : null}
-        <View style={styles.statusPill}>
+        <TouchableOpacity style={styles.statusPill} onPress={onOpenModels}>
           <View style={styles.statusDot} />
-          <Text style={styles.statusText}>lfm2.5 · on-device</Text>
-        </View>
+          <Text style={styles.statusText}>{modelLabel} · on-device</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );

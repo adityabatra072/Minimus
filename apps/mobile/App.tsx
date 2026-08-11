@@ -4,16 +4,20 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { initSdk } from './src/services/sdk';
 import SetupScreen from './src/screens/SetupScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import ModelsScreen from './src/screens/ModelsScreen';
+import { useModelStore } from './src/stores/modelStore';
 
 type AppState = 'initializing' | 'setup' | 'ready' | 'error';
 
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<AppState>('initializing');
   const [error, setError] = useState('');
+  const [showModels, setShowModels] = useState(false);
 
   const boot = useCallback(async () => {
     setState('initializing');
     try {
+      await useModelStore.getState().hydrate();
       await initSdk();
       setState('setup');
     } catch (e) {
@@ -37,7 +41,12 @@ export default function App(): React.JSX.Element {
           </View>
         )}
         {state === 'setup' && <SetupScreen onReady={() => setState('ready')} />}
-        {state === 'ready' && <ChatScreen />}
+        {state === 'ready' &&
+          (showModels ? (
+            <ModelsScreen onClose={() => setShowModels(false)} />
+          ) : (
+            <ChatScreen onOpenModels={() => setShowModels(true)} />
+          ))}
         {state === 'error' && (
           <View style={styles.center}>
             <Text style={styles.error}>SDK init failed: {error}</Text>
