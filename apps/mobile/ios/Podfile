@@ -39,6 +39,14 @@ target 'mobile' do
         if bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 17.5
           bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.5'
         end
+        # The @runanywhere pods declare swift_version 6.2 but their sources
+        # trip Xcode 26's Swift-6 strict concurrency (Sendable violations in
+        # HybridAudioCapture/Playback). Compile them in Swift 5 language mode
+        # with minimal concurrency checking until fixed upstream.
+        if t.name.start_with?('RunAnywhere')
+          bc.build_settings['SWIFT_VERSION'] = '5.0'
+          bc.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+        end
       end
     end
   end
