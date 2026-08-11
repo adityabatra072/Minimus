@@ -27,6 +27,8 @@ export interface PromptOptions {
   oneToolPerTurn: boolean;
   /** Extra persona/context lines from the app (device, user name, date). */
   preamble?: string;
+  /** Injected as "Current date/time" — defaults to now. Pass a fixed value in tests. */
+  now?: Date;
 }
 
 export function buildSystemPrompt(tools: ToolDefinition[], opts: PromptOptions): string {
@@ -35,6 +37,12 @@ export function buildSystemPrompt(tools: ToolDefinition[], opts: PromptOptions):
     opts.preamble ??
       'You are Minimus, a capable assistant running fully on this phone. You get things DONE using tools, then confirm briefly.',
   );
+  // Models cannot know the wall clock, and scheduling tasks send small models
+  // into "but I don't know the current time" spirals without this line.
+  const now = opts.now ?? new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const local = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())} (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][now.getDay()]})`;
+  lines.push(`Current date/time: ${local}.`);
   lines.push('');
   lines.push('## Tools');
   for (const t of tools) lines.push(toolLine(t));
@@ -53,9 +61,16 @@ export function buildSystemPrompt(tools: ToolDefinition[], opts: PromptOptions):
   }
   lines.push(
     'After a tool result arrives, either call the next tool needed or give the user a short final answer.',
-    'If no tool is needed, just answer directly.',
+    'Use tools only when needed — if you already know the answer, answer directly without tools.',
+    'Never repeat a tool call you already made; its result is already above. Once you have what you need, STOP calling tools and answer.',
     'Never invent tool results. Never call tools that are not listed.',
   );
+  const hints = tools.filter((t) => t.usageHint);
+  if (hints.length > 0) {
+    lines.push('');
+    lines.push('## When to use which tool');
+    for (const t of hints) lines.push(`- ${t.usageHint}`);
+  }
   return lines.join('\n');
 }
 

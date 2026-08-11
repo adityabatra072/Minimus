@@ -23,6 +23,12 @@ export interface ToolDefinition {
   group?: string;
   /** When true (or predicate returns true), the loop pauses for user confirmation. */
   needsApproval?: boolean | ((args: Record<string, unknown>) => boolean);
+  /**
+   * One-line "when to use this" rule surfaced in the system prompt. Reserve it
+   * for tools small models chronically misroute (e.g. schedule_task vs
+   * create_reminder) — every hint costs prompt tokens on every request.
+   */
+  usageHint?: string;
   execute: ToolExecutor;
 }
 

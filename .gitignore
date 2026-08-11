@@ -6,6 +6,9 @@ dist/
 # local model weights (multi-GB GGUFs)
 models/
 
+# local binary tooling (llama-server etc.)
+tools/
+
 # env & secrets
 .env
 .env.*

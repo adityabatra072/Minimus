@@ -180,6 +180,42 @@ describe('AgentLoop', () => {
     expect(toolFinished.result).toContain('[truncated');
   });
 
+  it('breaks duplicate-call loops with a cached result instead of re-executing', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      '[flashlight(on=True)]',
+      '[flashlight(on=True)]', // exact repeat — must NOT execute again
+      'Done.',
+    ]);
+    const events = await collect(new AgentLoop().run('flashlight on', { adapter, tools }));
+    expect(log).toEqual(['flashlight:true']); // executed exactly once
+    expect(finished(events).reason).toBe('completed');
+    // The duplicate notice must be visible to the model.
+    expect(JSON.stringify(adapter.requests.at(-1))).toContain('DUPLICATE CALL');
+  });
+
+  it('injects a wrap-up nudge before hitting max turns', async () => {
+    const { tools } = makeTools();
+    const script = Array(10).fill('[flashlight(on=False)]');
+    const adapter = new MockAdapter(script);
+    await collect(new AgentLoop().run('loop', { adapter, tools }));
+    const allRequests = JSON.stringify(adapter.requests.at(-1));
+    expect(allRequests).toContain('Finish now');
+  });
+
+  it('retries when the model emits only thinking, then accepts the real answer', async () => {
+    const { tools, log } = makeTools();
+    const adapter = new MockAdapter([
+      '<think>hmm let me consider every possibility at great length</think>',
+      '[flashlight(on=True)]',
+      'On.',
+    ]);
+    const events = await collect(new AgentLoop().run('flashlight on', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(log).toEqual(['flashlight:true']);
+    expect(JSON.stringify(adapter.requests.at(-1))).toContain('ran out of space thinking');
+  });
+
   it('stops at max turns', async () => {
     const { tools } = makeTools();
     // Model loops forever calling the same tool.

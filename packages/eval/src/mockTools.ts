@@ -22,20 +22,6 @@ const CANNED: Record<string, unknown> = {
   set_brightness: { ok: true },
   open_app: { ok: true, opened: true },
   device_info: { battery_percent: 78, network: 'wifi', storage_free_gb: 42.5 },
-  web_search: {
-    results: [
-      {
-        title: 'Drake announces new single "Night Mode" (2026)',
-        url: 'https://example.com/drake-night-mode',
-        snippet: 'Drake released his latest song Night Mode on August 8, 2026…',
-      },
-      {
-        title: 'Drake — discography',
-        url: 'https://example.com/drake-discography',
-        snippet: 'Full list of Drake releases through 2026.',
-      },
-    ],
-  },
   fetch_page: { text: 'Night Mode is the latest single by Drake, released August 8, 2026.' },
   calendar_create: { ok: true, event_id: 'evt_123' },
   calendar_query: { events: [{ title: 'Standup', start: '2026-08-12T09:30:00', id: 'evt_9' }] },
@@ -52,6 +38,48 @@ const CANNED: Record<string, unknown> = {
   run_js: { output: '42' },
 };
 
+/** Query-aware mock search — returning Drake results for every query teaches
+ * the model that search is broken and sends small models into retry spirals. */
+function webSearchFor(query: string): Record<string, unknown> {
+  const q = query.toLowerCase();
+  if (q.includes('drake')) {
+    return {
+      results: [
+        {
+          title: 'Drake announces new single "Night Mode" (2026)',
+          url: 'https://example.com/drake-night-mode',
+          snippet: 'Drake released his latest song Night Mode on August 8, 2026…',
+        },
+        {
+          title: 'Drake — discography',
+          url: 'https://example.com/drake-discography',
+          snippet: 'Full list of Drake releases through 2026.',
+        },
+      ],
+    };
+  }
+  if (q.includes('france') || q.includes('paris')) {
+    return {
+      results: [
+        {
+          title: 'Paris - Wikipedia',
+          url: 'https://en.wikipedia.org/wiki/Paris',
+          snippet: 'Paris is the capital and largest city of France.',
+        },
+      ],
+    };
+  }
+  return {
+    results: [
+      {
+        title: `Results for "${query}"`,
+        url: 'https://example.com/generic',
+        snippet: `General information about ${query}.`,
+      },
+    ],
+  };
+}
+
 export function buildMockTools(overrides: Record<string, unknown> = {}): MockToolSetup {
   const registry = new ToolRegistry();
   const recorded: RecordedCall[] = [];
@@ -60,7 +88,14 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     (name: string) =>
     async (args: Record<string, unknown>): Promise<Record<string, unknown>> => {
       recorded.push({ name, arguments: args });
-      const result = overrides[name] ?? CANNED[name] ?? { ok: true };
+      const override = overrides[name];
+      if (override !== undefined) {
+        return typeof override === 'object' && override !== null
+          ? (override as Record<string, unknown>)
+          : { result: override };
+      }
+      if (name === 'web_search') return webSearchFor(String(args['query'] ?? ''));
+      const result = CANNED[name] ?? { ok: true };
       return typeof result === 'object' && result !== null
         ? (result as Record<string, unknown>)
         : { result };
@@ -177,7 +212,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'create_reminder',
     group: 'schedule',
-    description: 'Create a reminder',
+    description:
+      'Create a simple reminder that shows a fixed message at a time. It cannot check anything or perform actions — for "do/check X later" use schedule_task instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -219,7 +255,10 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'schedule_task',
     group: 'schedule',
-    description: 'Schedule the assistant to do something later (it will run the given instruction at that time)',
+    description:
+      'Schedule the assistant itself to act later: at the given time it wakes up with ALL tools (battery, web, notifications, music, …) and performs the instruction.',
+    usageHint:
+      '"in N minutes / at TIME, do or check something" → schedule_task(instruction, when="+N" or ISO time). Never use set_timer or create_reminder for tasks that require checking or doing something.',
     parameters: {
       type: 'object',
       properties: {

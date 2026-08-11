@@ -128,6 +128,17 @@ export class AgentLoop {
 
     let finalText = '';
     let parseRetriesThisTurn = 0;
+    // Duplicate-call breaker: small models love re-running the same search
+    // "to be sure". Cache results by tool+args; a repeat gets the cached value
+    // plus an explicit instruction to conclude, and costs no real execution.
+    const executedCalls = new Map<string, string>();
+    let wrapUpNudged = false;
+    // Same-tool streak: 3+ consecutive calls to one tool (with varied args —
+    // the duplicate breaker can't catch those) means the model is refining
+    // instead of concluding.
+    let streakTool = '';
+    let streakCount = 0;
+    let streakNudged = false;
 
     for (let turn = startTurn; turn < policy.maxTurns; turn++) {
       if (config.signal?.aborted) {
@@ -168,6 +179,31 @@ export class AgentLoop {
       // ---- parse ----
       const parsed = parseAssistantOutput(raw, policy.format, knownToolNames);
       if (parsed.reasoning) yield { type: 'reasoning_delta', text: parsed.reasoning };
+
+      // Thinking overrun: the model burned its whole budget inside <think>
+      // and emitted no visible answer. Nudge it to conclude instead of
+      // treating the empty string as a completed run.
+      if (parsed.calls.length === 0 && parsed.text === '' && parsed.reasoning !== '') {
+        parseRetriesThisTurn++;
+        if (parseRetriesThisTurn > maxParseRetries) {
+          yield {
+            type: 'run_finished',
+            reason: 'error',
+            finalText,
+            error: 'model produced only thinking output, no answer, after retries',
+          };
+          return;
+        }
+        messages.push({ role: 'assistant', content: '', reasoning: parsed.reasoning });
+        messages.push({
+          role: 'user',
+          content:
+            'You ran out of space thinking. Decide NOW: reply with the single tool call or the short final answer. Keep thinking to one sentence.',
+        });
+        yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: 'thinking overrun' };
+        yield { type: 'turn_finished', turn };
+        continue;
+      }
 
       // Terminal condition: plain text, no tool call.
       if (parsed.calls.length === 0) {
@@ -245,6 +281,23 @@ export class AgentLoop {
           }
         }
 
+        // ---- duplicate breaker ----
+        const callKey = `${call.name}:${JSON.stringify(call.arguments)}`;
+        const cached = executedCalls.get(callKey);
+        if (cached !== undefined) {
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            toolName: call.name,
+            content: JSON.stringify({
+              note: 'DUPLICATE CALL — you already ran this exact call; its result is repeated below. Do not call it again. Answer the user now, or call a DIFFERENT tool.',
+              result: cached.slice(0, 1000),
+            }),
+          });
+          yield { type: 'tool_call_finished', call, result: cached, isError: false };
+          continue;
+        }
+
         // ---- execute ----
         yield { type: 'tool_call_started', call };
         const controller = new AbortController();
@@ -264,6 +317,7 @@ export class AgentLoop {
           config.signal?.removeEventListener('abort', onAbort);
         }
         resultText = capToolResult(resultText, policy.toolResultCharCap);
+        if (!isError) executedCalls.set(callKey, resultText);
         messages.push({
           role: 'tool',
           toolCallId: call.id,
@@ -272,6 +326,35 @@ export class AgentLoop {
           isError,
         });
         yield { type: 'tool_call_finished', call, result: resultText, isError };
+      }
+
+      // ---- same-tool streak nudge ----
+      const lastCallName = toolCalls[toolCalls.length - 1]?.name ?? '';
+      if (lastCallName === streakTool) {
+        streakCount++;
+      } else {
+        streakTool = lastCallName;
+        streakCount = 1;
+        streakNudged = false;
+      }
+      if (streakCount >= 2 && !streakNudged) {
+        streakNudged = true;
+        messages.push({
+          role: 'user',
+          content: `You have called ${streakTool} ${streakCount} times. The results above are sufficient — do not call it again. Answer the user now.`,
+        });
+      }
+
+      // ---- wrap-up nudge ----
+      // Two turns before the cap, tell the model to conclude with what it has;
+      // beats silently dying at max_turns with no answer at all.
+      if (!wrapUpNudged && turn === policy.maxTurns - 3) {
+        wrapUpNudged = true;
+        messages.push({
+          role: 'user',
+          content:
+            'Finish now: based on the tool results above, give your final answer. Do not call any more tools.',
+        });
       }
 
       // ---- compact ----

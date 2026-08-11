@@ -24,15 +24,18 @@ export interface ModelPolicy {
 
 export const DEFAULT_POLICIES: ModelPolicy[] = [
   {
+    // LFM2.5 is a hybrid reasoner with NO prompt-level thinking off-switch
+    // ("/no_think" is Qwen-only and breaks LFM — see SDK
+    // llm_thinking_directive_internal.h). Budget for the <think> block instead.
     match: 'lfm',
     format: 'pythonic',
     maxTurns: 10,
     oneToolPerTurn: true,
     temperature: 0.1,
     topP: 0.95,
-    thinking: false,
+    thinking: true,
     contextWindowTokens: 32768,
-    maxOutputTokens: 512,
+    maxOutputTokens: 1280,
     toolResultCharCap: 6000,
   },
   {

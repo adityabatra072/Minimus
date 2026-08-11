@@ -92,6 +92,10 @@ export class OpenAIAdapter implements ModelAdapter {
     const decoder = new TextDecoder();
     let buffer = '';
     let usage: { promptTokens?: number; completionTokens?: number } | undefined;
+    // Servers running with reasoning parsing (llama-server --jinja) split
+    // `<think>` output into delta.reasoning_content. Re-wrap it in literal
+    // think tags so the harness parser sees one uniform representation.
+    let inReasoning = false;
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -110,9 +114,18 @@ export class OpenAIAdapter implements ModelAdapter {
           } catch {
             continue;
           }
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (typeof delta === 'string' && delta.length > 0) {
-            yield { type: 'delta', text: delta };
+          const delta = parsed.choices?.[0]?.delta ?? {};
+          const reasoning = delta.reasoning_content;
+          if (typeof reasoning === 'string' && reasoning.length > 0) {
+            const prefix = inReasoning ? '' : '<think>';
+            inReasoning = true;
+            yield { type: 'delta', text: prefix + reasoning };
+          }
+          const content = delta.content;
+          if (typeof content === 'string' && content.length > 0) {
+            const prefix = inReasoning ? '</think>' : '';
+            inReasoning = false;
+            yield { type: 'delta', text: prefix + content };
           }
           if (parsed.usage) {
             usage = {
@@ -125,6 +138,7 @@ export class OpenAIAdapter implements ModelAdapter {
     } finally {
       reader.releaseLock();
     }
+    if (inReasoning) yield { type: 'delta', text: '</think>' };
     yield { type: 'done', ...(usage ? { usage } : {}) };
   }
 }
