@@ -29,3 +29,41 @@ for (const pkg of ['core', 'llamacpp', 'onnx', 'qhexrt']) {
     console.warn(`[fix-runanywhere-windows] ${pkg}: pattern not found — check upstream fix`);
   }
 }
+
+// -----------------------------------------------------------------------------
+// Second fix: the RN binding refuses LoadOptions.contextLength even though the
+// ModelLoadRequest proto carries it (field: "the one load knob every on-device
+// runtime exposes"). Without it every model loads with a 2048 context and the
+// agent's multi-turn transcripts overflow. Patched in the SDK monorepo too.
+// -----------------------------------------------------------------------------
+const loadSupport = join(
+  root,
+  'node_modules/@runanywhere/core/src/Public/Api/LoadOptionsSupport.ts',
+);
+if (existsSync(loadSupport)) {
+  const src = readFileSync(loadSupport, 'utf8');
+  const gate = "    options?.contextLength !== undefined ? 'contextLength' : undefined,\n";
+  if (src.includes(gate)) {
+    writeFileSync(loadSupport, src.replace(gate, ''));
+    console.log('[fix-runanywhere-windows] core: contextLength gate removed');
+  } else {
+    console.log('[fix-runanywhere-windows] core: contextLength gate already removed');
+  }
+}
+const modelsTs = join(root, 'node_modules/@runanywhere/core/src/Public/Api/Models.ts');
+if (existsSync(modelsTs)) {
+  const src = readFileSync(modelsTs, 'utf8');
+  const anchor = `        ...(requestedBackend ? { framework: requestedBackend.backend } : {}),
+        forceReload: options?.forceReload ?? false,`;
+  const patched = `        ...(requestedBackend ? { framework: requestedBackend.backend } : {}),
+        ...(options?.contextLength !== undefined ? { contextLength: options.contextLength } : {}),
+        forceReload: options?.forceReload ?? false,`;
+  if (src.includes(patched)) {
+    console.log('[fix-runanywhere-windows] core: contextLength already forwarded');
+  } else if (src.includes(anchor)) {
+    writeFileSync(modelsTs, src.replace(anchor, patched));
+    console.log('[fix-runanywhere-windows] core: contextLength forwarded in load()');
+  } else {
+    console.warn('[fix-runanywhere-windows] core: Models.ts anchor not found');
+  }
+}
