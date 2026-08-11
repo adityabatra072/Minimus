@@ -41,8 +41,11 @@ type Item =
       resolved?: 'yes' | 'no';
     };
 
+// Seeded with time so Fast Refresh (which resets module state) can never
+// mint ids that collide with items already in React state.
 let idCounter = 0;
-const nextId = () => `i${++idCounter}`;
+const idSeed = Date.now().toString(36);
+const nextId = () => `i${idSeed}_${++idCounter}`;
 
 const registry = buildToolRegistry();
 
