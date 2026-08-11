@@ -61,6 +61,15 @@ export type AgentEvent =
   | { type: 'turn_started'; turn: number }
   | { type: 'text_delta'; text: string }
   | { type: 'reasoning_delta'; text: string }
+  | {
+      /** Parsed result of a model turn: cleaned prose with tool syntax and
+       * think blocks removed. UIs render THIS, not the raw stream. */
+      type: 'assistant_turn';
+      turn: number;
+      text: string;
+      reasoning: string;
+      toolCallCount: number;
+    }
   | { type: 'tool_call_proposed'; call: ToolCall }
   | { type: 'approval_required'; call: ToolCall }
   | { type: 'approval_resolved'; call: ToolCall; approved: boolean }

@@ -205,6 +205,14 @@ export class AgentLoop {
         continue;
       }
 
+      yield {
+        type: 'assistant_turn',
+        turn,
+        text: parsed.text,
+        reasoning: parsed.reasoning,
+        toolCallCount: parsed.calls.length,
+      };
+
       // Terminal condition: plain text, no tool call.
       if (parsed.calls.length === 0) {
         const assistant: AssistantMessage = {

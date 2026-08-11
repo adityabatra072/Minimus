@@ -20,6 +20,9 @@ export default function SetupScreen({ onReady }: { onReady: () => void }): React
     try {
       const downloaded = await RunAnywhere.models.list({ downloadedOnly: true });
       if (downloaded.some((m) => m.id === DEFAULT_MODEL_ID)) {
+        // Preload with an agent-sized context — the auto-load default is a
+        // 2048 window, which multi-turn tool loops overflow immediately.
+        await RunAnywhere.models.load(DEFAULT_MODEL_ID, { contextLength: 8192 });
         setPhase('ready');
         onReady();
       } else {
@@ -43,6 +46,7 @@ export default function SetupScreen({ onReady }: { onReady: () => void }): React
         if (ev.type === 'progress') setPercent(Math.round(ev.percent));
         if (ev.type === 'failed') throw ev.error ?? new Error('download failed');
       }
+      await RunAnywhere.models.load(DEFAULT_MODEL_ID, { contextLength: 8192 });
       setPhase('ready');
       onReady();
     } catch (e) {

@@ -1,4 +1,4 @@
-import { RunAnywhere, type ChatMessage as SdkChatMessage } from '@runanywhere/core';
+import { RunAnywhere } from '@runanywhere/core';
 import type {
   AdapterEvent,
   ChatMessage,
@@ -9,26 +9,33 @@ import type {
 /**
  * ModelAdapter over the on-device RunAnywhere SDK.
  *
- * Uses `llm.generateStream` WITHOUT SDK-side tools: the agent-core loop owns
- * tool parsing/execution (identical behavior to the Windows eval rig), and the
- * SDK's own tool loop would otherwise swallow the raw call text. Thought
- * tokens are re-wrapped in literal <think> tags — one uniform representation
- * for the harness parser.
+ * The adapter formats the FULL ChatML transcript itself and sends it as a
+ * string prompt. The llama.cpp backend passes pre-templated prompts through
+ * VERBATIM when they contain `<|im_start|>` (build_prompt, llamacpp_backend
+ * .cpp) — which sidesteps a real on-device failure: LFM2.5's jinja template
+ * is unknown to llama_chat_apply_template (result=-1), and the "role:
+ * content" fallback makes the model emit EOS after ~9 tokens. Both LFM2/2.5
+ * and Qwen are ChatML-native, so one formatter serves every catalog model.
+ *
+ * Tool calling stays HARNESS-side (agent-core parses the raw text), identical
+ * to the Windows eval rig.
  */
 
-function toSdkMessages(messages: ChatMessage[]): {
-  history: SdkChatMessage[];
-  systemPrompt?: string;
-} {
-  const history: SdkChatMessage[] = [];
-  let systemPrompt: string | undefined;
+const IM_START = '<|im_start|>';
+const IM_END = '<|im_end|>';
+
+function toChatMl(messages: ChatMessage[]): string {
+  let out = '';
+  const turn = (role: string, content: string) => {
+    out += `${IM_START}${role}\n${content}${IM_END}\n`;
+  };
   for (const m of messages) {
     switch (m.role) {
       case 'system':
-        systemPrompt = m.content;
+        turn('system', m.content);
         break;
       case 'user':
-        history.push({ role: 'user', content: m.content });
+        turn('user', m.content);
         break;
       case 'assistant': {
         let content = m.content;
@@ -37,18 +44,18 @@ function toSdkMessages(messages: ChatMessage[]): {
             (content ? '\n' : '') +
             `<tool_call>${JSON.stringify({ name: call.name, arguments: call.arguments })}</tool_call>`;
         }
-        history.push({ role: 'assistant', content });
+        turn('assistant', content);
         break;
       }
       case 'tool':
-        history.push({
-          role: 'user',
-          content: `<tool_response name="${m.toolName}">\n${m.content}\n</tool_response>`,
-        });
+        // ChatML has no tool role that every model understands — deliver the
+        // result as a user turn with a stable envelope (same as eval rig).
+        turn('user', `<tool_response name="${m.toolName}">\n${m.content}\n</tool_response>`);
         break;
     }
   }
-  return systemPrompt !== undefined ? { history, systemPrompt } : { history };
+  out += `${IM_START}assistant\n`;
+  return out;
 }
 
 export class LocalAdapter implements ModelAdapter {
@@ -58,18 +65,25 @@ export class LocalAdapter implements ModelAdapter {
     messages: ChatMessage[],
     options: GenerateOptions,
   ): AsyncIterable<AdapterEvent> {
-    const { history, systemPrompt } = toSdkMessages(messages);
-    const stream = RunAnywhere.llm.generateStream(history, {
+    const prompt = toChatMl(messages);
+    console.log(`[minimus] generate start model=${this.modelId} promptChars=${prompt.length}`);
+    const stream = RunAnywhere.llm.generateStream(prompt, {
       model: this.modelId,
       temperature: options.temperature,
       topP: options.topP,
       maxOutputTokens: options.maxOutputTokens,
-      ...(systemPrompt !== undefined ? { systemPrompt } : {}),
-      ...(options.stopSequences?.length ? { stopSequences: options.stopSequences } : {}),
+      // Stop on the next turn header: with a verbatim prompt the model owns
+      // turn boundaries, and some models keep writing the next turn.
+      stopSequences: [IM_END, IM_START, ...(options.stopSequences ?? [])],
     });
 
     let inThinking = false;
+    let eventCount = 0;
     for await (const event of stream) {
+      eventCount += 1;
+      if (eventCount === 1 || eventCount % 100 === 0) {
+        console.log(`[minimus] stream event #${eventCount}: ${event.type}`);
+      }
       if (options.signal?.aborted) {
         // Exiting the for-await closes the SDK's pushStream, which cancels
         // the native generation.
@@ -91,6 +105,7 @@ export class LocalAdapter implements ModelAdapter {
         case 'failed':
           throw event.error;
         case 'completed':
+          console.log(`[minimus] stream completed after ${eventCount} events`);
           break;
         default:
           break;
