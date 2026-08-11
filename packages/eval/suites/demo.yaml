@@ -1,0 +1,142 @@
+# Demo-script scenarios: the exact things we'll show on stage.
+# Run: npm run eval -- --suite demo --endpoint http://127.0.0.1:8080/v1 --model lfm2.5-2.6b
+suite: demo
+scenarios:
+  - id: flashlight-on
+    prompt: turn on the flashlight
+    tools: [device]
+    expect:
+      calls:
+        - tool: flashlight
+          args: { on: true }
+      max_turns: 3
+
+  - id: flashlight-off-phrasing
+    prompt: it's too bright, kill the torch
+    tools: [device]
+    expect:
+      calls:
+        - tool: flashlight
+          args: { on: false }
+      max_turns: 3
+
+  - id: open-spotify
+    prompt: open spotify
+    tools: [device]
+    expect:
+      calls:
+        - tool: open_app
+          args: { app: { re: "spotify" } }
+      max_turns: 3
+
+  - id: battery-check
+    prompt: how much battery do I have left?
+    tools: [device]
+    expect:
+      calls:
+        - tool: device_info
+      final_contains: ["78"]
+      max_turns: 3
+
+  - id: timer-simple
+    prompt: set a timer for 12 minutes
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: set_timer
+          args: { minutes: 12 }
+      max_turns: 3
+
+  - id: alarm-morning
+    prompt: wake me up at 6:45 tomorrow morning
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: set_alarm
+          args: { time: { re: "^0?6:45" } }
+      max_turns: 3
+
+  - id: calendar-meeting
+    prompt: put a meeting with Sanchit on my calendar tomorrow at 3pm for half an hour
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: calendar_create
+          args: { title: { re: "sanchit|meeting" }, start: { re: "T15:00" } }
+      max_turns: 3
+
+  - id: reminder-relative
+    prompt: remind me to take the tea off the stove in 10 minutes
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: create_reminder
+          args: { title: { re: "tea" } }
+      max_turns: 3
+
+  - id: web-search-simple
+    prompt: what's drake's latest song?
+    tools: [web]
+    expect:
+      calls:
+        - tool: web_search
+          args: { query: { re: "drake" } }
+      final_contains: ["Night Mode"]
+      max_turns: 4
+
+  - id: search-then-play
+    prompt: search for drake's latest song and play it on spotify
+    tools: [web, music]
+    expect:
+      calls:
+        - tool: web_search
+          args: { query: { re: "drake" } }
+        - tool: play_music
+          args: { query: { re: "night mode" } }
+      max_turns: 5
+
+  - id: email-compose
+    prompt: email sanchit@runanywhere.ai that the demo build is ready for review
+    tools: [comms]
+    expect:
+      calls:
+        - tool: send_email
+          args: { to: sanchit@runanywhere.ai, body: { re: "demo|build|ready" } }
+      max_turns: 3
+
+  - id: schedule-later
+    prompt: in 30 minutes, check my battery and notify me if it's below 50 percent
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: schedule_task
+          args: { instruction: { re: "battery" }, when: { re: "30" } }
+      max_turns: 3
+
+  - id: code-simple
+    prompt: write and run javascript to compute the 10th fibonacci number
+    tools: [code]
+    expect:
+      calls:
+        - tool: run_js
+          args: { code: { re: "fib|Fibonacci" } }
+      max_turns: 4
+
+  - id: no-tool-chitchat
+    prompt: what's the capital of France?
+    tools: [device, web]
+    expect:
+      no_calls: true
+      final_contains: ["Paris"]
+      max_turns: 2
+
+  - id: multi-step-morning
+    prompt: set an alarm for 7am, and put "gym" on my calendar for 6pm today
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: set_alarm
+          args: { time: { re: "^0?7:00" } }
+        - tool: calendar_create
+          args: { title: { re: "gym" } }
+      max_turns: 5
