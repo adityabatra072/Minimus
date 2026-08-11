@@ -212,6 +212,52 @@ class MinimusToolsModule(private val ctx: ReactApplicationContext) :
         return null
     }
 
+    // -------------------------------------------------------------- overlay
+    @ReactMethod
+    fun hasOverlayPermission(promise: Promise) {
+        promise.resolve(android.provider.Settings.canDrawOverlays(ctx))
+    }
+
+    @ReactMethod
+    fun requestOverlayPermission(promise: Promise) {
+        try {
+            val intent = Intent(
+                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:${ctx.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(intent)
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.reject("overlay_settings_failed", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun setOverlayEnabled(enabled: Boolean, promise: Promise) {
+        try {
+            val intent = Intent(ctx, OverlayService::class.java)
+            if (enabled) {
+                if (!android.provider.Settings.canDrawOverlays(ctx)) {
+                    promise.reject(
+                        "no_overlay_permission",
+                        "Display-over-other-apps permission is not granted.",
+                    )
+                    return
+                }
+                if (Build.VERSION.SDK_INT >= 26) {
+                    ctx.startForegroundService(intent)
+                } else {
+                    ctx.startService(intent)
+                }
+            } else {
+                ctx.stopService(intent)
+            }
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.reject("overlay_failed", e.message)
+        }
+    }
+
     companion object {
         private const val CHANNEL_ID = "minimus_agent"
     }

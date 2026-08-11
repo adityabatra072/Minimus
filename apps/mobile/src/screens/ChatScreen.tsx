@@ -14,6 +14,7 @@ import { LocalAdapter } from '../services/LocalAdapter';
 import { buildToolRegistry } from '../tools';
 import { DEFAULT_MODEL_ID } from '../services/catalog';
 import { verbFor, resultFor } from '../services/humanize';
+import { overlay } from '../services/overlay';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -286,14 +287,40 @@ export default function ChatScreen(): React.JSX.Element {
 }
 
 function Header(): React.JSX.Element {
+  const [bubbleOn, setBubbleOn] = useState(false);
+  const toggleBubble = useCallback(async () => {
+    try {
+      if (bubbleOn) {
+        await overlay.disable();
+        setBubbleOn(false);
+      } else {
+        const on = await overlay.enable();
+        setBubbleOn(on);
+      }
+    } catch {
+      setBubbleOn(false);
+    }
+  }, [bubbleOn]);
+
   return (
     <View style={styles.header}>
       <Text style={styles.wordmark}>
         minimus<Text style={styles.wordmarkDot}> ●</Text>
       </Text>
-      <View style={styles.statusPill}>
-        <View style={styles.statusDot} />
-        <Text style={styles.statusText}>lfm2.5 · on-device</Text>
+      <View style={styles.headerRight}>
+        {overlay.available() ? (
+          <TouchableOpacity
+            style={[styles.bubbleBtn, bubbleOn && styles.bubbleBtnOn]}
+            onPress={() => void toggleBubble()}
+            hitSlop={8}
+          >
+            <View style={[styles.bubbleGlyph, bubbleOn && styles.bubbleGlyphOn]} />
+          </TouchableOpacity>
+        ) : null}
+        <View style={styles.statusPill}>
+          <View style={styles.statusDot} />
+          <Text style={styles.statusText}>lfm2.5 · on-device</Text>
+        </View>
       </View>
     </View>
   );
@@ -379,6 +406,20 @@ const styles = StyleSheet.create({
   },
   wordmark: { color: color.text, fontSize: 20, fontWeight: '800', letterSpacing: 0.5 },
   wordmarkDot: { color: color.amber, fontSize: 12 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  bubbleBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: color.line,
+    backgroundColor: color.bg1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bubbleBtnOn: { borderColor: color.amberDeep },
+  bubbleGlyph: { width: 10, height: 10, borderRadius: 5, backgroundColor: color.faint },
+  bubbleGlyphOn: { backgroundColor: color.amber },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',

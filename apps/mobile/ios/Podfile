@@ -5,7 +5,9 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+# RunAnywhere SDK floor is iOS 17.5 (Package.swift/podspecs); RN's default
+# min_ios_version_supported is lower and makes pod resolution fail.
+platform :ios, '17.5'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
@@ -30,5 +32,14 @@ target 'mobile' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+    # Keep every pod at the SDK floor — some podspecs pin lower targets and
+    # Xcode 26 refuses mixed deployment targets with the prebuilt frameworks.
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |bc|
+        if bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 17.5
+          bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.5'
+        end
+      end
+    end
   end
 end
