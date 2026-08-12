@@ -24,7 +24,6 @@ const CANNED: Record<string, unknown> = {
   device_info: { battery_percent: 78, network: 'wifi', storage_free_gb: 42.5 },
   fetch_page: { text: 'Night Mode is the latest single by Drake, released August 8, 2026.' },
   calendar_create: { ok: true, event_id: 'evt_123' },
-  calendar_query: { events: [{ title: 'Standup', start: '2026-08-12T09:30:00', id: 'evt_9' }] },
   create_reminder: { ok: true, reminder_id: 'rem_1' },
   set_alarm: { ok: true, alarm_id: 'alm_1' },
   set_timer: { ok: true, timer_id: 'tmr_1' },
@@ -36,6 +35,29 @@ const CANNED: Record<string, unknown> = {
   clipboard_write: { ok: true },
   send_notification: { ok: true },
   run_js: { output: '42' },
+  remember: { ok: true, remembered: true },
+  recall: {
+    matches: [
+      { fact: 'Sarah recommended Trattoria da Enzo in Rome', saved: '2026-08-12' },
+      { fact: 'Battery was 74% at 18:40', saved: '2026-08-12' },
+    ],
+  },
+  define_macro: { ok: true, learned: true, step_count: 3 },
+  run_macro: { ok: true, performed: [{ tool: 'set_brightness', ok: true }] },
+  calendar_query: {
+    date: '2026-08-13',
+    events: [
+      { title: 'Standup', from: '09:30', to: '10:00' },
+      { title: 'Design review', from: '11:00', to: '12:00' },
+      { title: '1:1 with Sanchit', from: '15:00', to: '15:30' },
+    ],
+    free_gaps: [
+      { from: '08:00', to: '09:30', minutes: 90 },
+      { from: '10:00', to: '11:00', minutes: 60 },
+      { from: '12:00', to: '15:00', minutes: 180 },
+      { from: '15:30', to: '22:00', minutes: 390 },
+    ],
+  },
 };
 
 /** Query-aware mock search — returning Drake results for every query teaches
@@ -198,14 +220,13 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'calendar_query',
     group: 'schedule',
-    description: 'List calendar events in a date range',
+    description: 'Look at the calendar for a day: returns the events and the free gaps between them',
     parameters: {
       type: 'object',
       properties: {
-        from: { type: 'string', description: 'ISO date' },
-        to: { type: 'string', description: 'ISO date' },
+        date: { type: 'string', description: '"today", "tomorrow", or an ISO date like 2026-08-13' },
       },
-      required: ['from'],
+      required: ['date'],
     },
     execute: record('calendar_query'),
   });
@@ -358,6 +379,65 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     execute: record('run_js'),
   });
 
+
+  // ---- memory (on-device personal context) ----
+  registry.register({
+    name: 'remember',
+    group: 'core',
+    description: 'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
+    parameters: {
+      type: 'object',
+      properties: { fact: { type: 'string', description: 'the fact to remember, phrased plainly' } },
+      required: ['fact'],
+    },
+    execute: record('remember'),
+  });
+  registry.register({
+    name: 'recall',
+    group: 'core',
+    description: 'Search on-device memory for previously saved facts',
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'what to look for' } },
+      required: ['query'],
+    },
+    execute: record('recall'),
+  });
+
+  // ---- taught verbs ----
+  registry.register({
+    name: 'define_macro',
+    group: 'core',
+    description:
+      'Teach a new phrase that runs several actions at once. Give the phrase a name and the exact list of tool calls it should perform.',
+    usageHint:
+      '"when I say X, do A and B" or "new rule: …" → define_macro(name="X", steps=[{"tool":"...","arguments":{...}}, …]).',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'the phrase the user will say, e.g. "wind down"' },
+        steps: {
+          type: 'array',
+          description: 'ordered tool calls, each {"tool": "<tool name>", "arguments": {…}}',
+          items: { type: 'object' },
+        },
+      },
+      required: ['name', 'steps'],
+    },
+    execute: record('define_macro'),
+  });
+  registry.register({
+    name: 'run_macro',
+    group: 'core',
+    description: 'Run a phrase the user taught earlier (performs all of its actions)',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'the taught phrase' } },
+      required: ['name'],
+    },
+    execute: record('run_macro'),
+  });
+
   return { registry, recorded };
 }
 
@@ -368,7 +448,10 @@ export function matchesExpectedArgs(
   if (!expected) return true;
   for (const [key, want] of Object.entries(expected)) {
     const got = actual[key];
-    if (want !== null && typeof want === 'object' && !Array.isArray(want) && 're' in (want as object)) {
+    if (want !== null && typeof want === 'object' && !Array.isArray(want) && 'min_items' in (want as object)) {
+      const min = Number((want as { min_items: unknown }).min_items);
+      if (!Array.isArray(got) || got.length < min) return false;
+    } else if (want !== null && typeof want === 'object' && !Array.isArray(want) && 're' in (want as object)) {
       const re = new RegExp(String((want as { re: unknown }).re), 'i');
       if (!re.test(String(got ?? ''))) return false;
     } else if (Array.isArray(want)) {

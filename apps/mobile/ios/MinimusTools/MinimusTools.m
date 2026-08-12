@@ -24,6 +24,18 @@ RCT_EXPORT_MODULE(MinimusTools);
 
 + (BOOL)requiresMainQueueSetup { return NO; }
 
+// ------------------------------------------------------------ diagnostics
+
+/**
+ * Release builds don't wire JS console output to the device console, which
+ * makes on-device QA blind. This forwards agent diagnostics to NSLog so they
+ * show up in `idevicesyslog`.
+ */
+RCT_EXPORT_METHOD(log:(NSString *)message)
+{
+  NSLog(@"[minimus] %@", message);
+}
+
 // ---------------------------------------------------------------- torch
 
 RCT_EXPORT_METHOD(setTorch:(BOOL)on

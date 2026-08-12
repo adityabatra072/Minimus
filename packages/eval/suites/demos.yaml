@@ -1,0 +1,101 @@
+# The demo-day scenarios from docs/DEMOS.md, verbatim.
+# These are the utterances that will be said in front of an audience, so this
+# suite is the gate: if a beat isn't green here, it does not go in the show.
+# Run: npm run eval -- --suite demos --model lfm2.5-2.6b --repeats 3
+suite: demos
+scenarios:
+  # --- 1. the lawsuit demo: private context, stored locally ---
+  - id: private-remember
+    prompt: Remember that I'm on 20mg of Lexapro, my therapist is Dr. Okafor, and my appointment is Thursday at 4pm.
+    tools: [core, schedule]
+    expect:
+      calls:
+        - tool: remember
+          args: { fact: { re: "okafor|lexapro" } }
+      max_turns: 5
+
+  - id: private-recall
+    prompt: What do I need to remember about Thursday?
+    tools: [core]
+    expect:
+      calls:
+        - tool: recall
+      max_turns: 4
+
+  # --- 2. the watchdog: baseline + deferred agency ---
+  - id: watchdog-arm
+    prompt: Check my battery now and remember it. Then in 3 minutes check it again and tell me if it dropped more than 2 percent.
+    tools: [core, device, schedule]
+    expect:
+      calls:
+        - tool: device_info
+        - tool: schedule_task
+          args: { when: { re: "3" } }
+      max_turns: 6
+
+  - id: watchdog-fire
+    # what the scheduler hands back to the model when the task comes due
+    prompt: Check the battery again and tell me if it dropped more than 2 percent since I last checked.
+    tools: [core, device]
+    expect:
+      calls:
+        - tool: device_info
+      max_turns: 5
+
+  # --- 3. teach it a verb ---
+  - id: teach-macro
+    prompt: "New rule: when I say wind down, set the brightness to 20 percent, turn the flashlight off, and remind me to set my alarm."
+    tools: [core, device, schedule]
+    expect:
+      calls:
+        - tool: define_macro
+          args: { name: { re: "wind ?down" }, steps: { min_items: 2 } }
+      max_turns: 5
+
+  - id: run-macro
+    prompt: Wind down.
+    tools: [core, device, schedule]
+    expect:
+      calls:
+        - tool: run_macro
+          args: { name: { re: "wind ?down" } }
+      max_turns: 4
+
+  # --- 4. calendar judgment under fuzzy constraints ---
+  - id: calendar-judgment
+    prompt: Look at tomorrow — find me 90 minutes for the gym that isn't before 10am and isn't straight after standup, and put it in.
+    tools: [schedule]
+    expect:
+      calls:
+        - tool: calendar_query
+        - tool: calendar_create
+          args: { title: { re: "gym" } }
+      max_turns: 6
+
+  # --- bench: must never fail, never headlined ---
+  - id: spotify-named-track
+    prompt: Play Janice STFU on Spotify
+    tools: [music]
+    expect:
+      calls:
+        - tool: play_music
+          args: { query: { re: "janice" } }
+      max_turns: 4
+
+  - id: flashlight-on
+    prompt: turn on the flashlight
+    tools: [device]
+    expect:
+      calls:
+        - tool: flashlight
+          args: { on: true }
+      max_turns: 3
+
+  - id: battery-check
+    prompt: how much battery do I have left?
+    tools: [device]
+    expect:
+      calls:
+        - tool: device_info
+      final_contains: ["78"]
+      max_turns: 3

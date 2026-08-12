@@ -16,6 +16,8 @@ import { useModelStore } from '../stores/modelStore';
 import { verbFor, resultFor } from '../services/humanize';
 import { overlay } from '../services/overlay';
 import { scheduler } from '../services/scheduler';
+import { diag } from '../services/diag';
+import { loadMacros } from '../tools/macroTools';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -108,9 +110,30 @@ export default function ChatScreen({
         { kind: origin === 'scheduled' ? 'scheduled' : 'user', id: nextId(), text: prompt.trim() },
       ]);
       scrollDown();
+      const runStartedAt = Date.now();
+      diag(`run start (${origin}) model=${activeModelId} prompt=${JSON.stringify(prompt.trim().slice(0, 90))}`);
 
       const adapter = new LocalAdapter(activeModelId);
       const loop = new AgentLoop();
+
+      // Taught phrases have to be visible in the system prompt, or a bare
+      // "wind down" reads as small talk instead of a macro invocation.
+      const macros = await loadMacros().catch(() => []);
+      const preambleLines = [
+        'You are Minimus, running entirely on this phone. You get things DONE using tools, then confirm briefly.',
+      ];
+      if (macros.length > 0) {
+        preambleLines.push(
+          `Phrases the user has taught you (run these with run_macro): ${macros
+            .map((m) => `"${m.name}"`)
+            .join(', ')}. If the user says one of them, call run_macro with that name.`,
+        );
+      }
+      if (origin === 'scheduled') {
+        preambleLines.push(
+          'This is a task you scheduled earlier and it is now due. Carry it out with your tools, then state the outcome in one short sentence.',
+        );
+      }
 
       let railId: string | null = null;
       let saidAnything = false;
@@ -160,6 +183,7 @@ export default function ChatScreen({
         const events = loop.run(prompt.trim(), {
           adapter,
           tools: registry,
+          preamble: preambleLines.join('\n'),
           approvals: (req) => askApproval(req.call),
           signal: abort.signal,
         });
@@ -191,8 +215,8 @@ export default function ChatScreen({
             break;
           case 'assistant_turn':
             setWorking(false);
-            console.log(
-              `[minimus] assistant_turn calls=${ev.toolCallCount} text=${JSON.stringify(ev.text.slice(0, 120))}`,
+            diag(
+              `turn ${ev.turn} answered: calls=${ev.toolCallCount} text=${JSON.stringify(ev.text.slice(0, 120))}`,
             );
             // Prose from a tool-calling turn is usually preamble ("Let me
             // check…") — show it only when it's the final answer-ish turn or
@@ -204,6 +228,7 @@ export default function ChatScreen({
             }
             break;
           case 'tool_call_started':
+            diag(`tool ${ev.call.name} args=${JSON.stringify(ev.call.arguments).slice(0, 160)}`);
             upsertRail((ops) => [
               ...ops,
               { id: ev.call.id, verb: verbFor(ev.call), status: 'running' },
@@ -212,6 +237,7 @@ export default function ChatScreen({
             break;
           case 'tool_call_finished': {
             const summary = resultFor(ev.call, ev.result, ev.isError);
+            diag(`tool ${ev.call.name} -> ${ev.isError ? 'ERROR ' : ''}${summary}`);
             if (!ev.isError) lastOpSummary = summary;
             upsertRail((ops) => {
               const existing = ops.find((o) => o.id === ev.call.id);
@@ -237,6 +263,9 @@ export default function ChatScreen({
             }
             break;
           case 'run_finished':
+            diag(
+              `run finished reason=${ev.reason} in ${((Date.now() - runStartedAt) / 1000).toFixed(1)}s${ev.error ? ` error=${ev.error}` : ''}`,
+            );
             finalText = ev.finalText || (lastOpSummary ? `Done — ${lastOpSummary.toLowerCase()}.` : '');
             if (ev.reason === 'completed' && !saidAnything && lastOpSummary) {
               // The model acted but never spoke — close the loop honestly
