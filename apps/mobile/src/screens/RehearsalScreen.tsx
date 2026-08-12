@@ -2,7 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { AgentLoop, type AgentEvent } from '@minimus/agent-core';
 import { LocalAdapter } from '../services/LocalAdapter';
-import { buildToolRegistry } from '../tools';
+import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { loadMacros } from '../tools/macroTools';
 import { diag } from '../services/diag';
@@ -99,7 +99,7 @@ interface BeatResult {
   tools?: string[];
 }
 
-const registry = buildToolRegistry();
+const registry = getToolRegistry();
 
 export default function RehearsalScreen({ onClose }: { onClose: () => void }): React.JSX.Element {
   const activeModelId = useModelStore((s) => s.activeModelId);

@@ -7,6 +7,8 @@ import ChatScreen from './src/screens/ChatScreen';
 import ModelsScreen from './src/screens/ModelsScreen';
 import RehearsalScreen from './src/screens/RehearsalScreen';
 import { useModelStore } from './src/stores/modelStore';
+import { scheduler } from './src/services/scheduler';
+import { runAgentHeadless } from './src/services/headlessAgent';
 
 type AppState = 'initializing' | 'setup' | 'ready' | 'error';
 
@@ -31,6 +33,16 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  // The scheduler lives above the screens: a deferred task has to fire whether
+  // the user is on the chat, the model manager or the rehearsal screen. The
+  // chat screen swaps in a richer runner while it's mounted.
+  useEffect(() => {
+    if (state !== 'ready') return;
+    scheduler.setRunner(runAgentHeadless);
+    scheduler.start();
+    void scheduler.tick();
+  }, [state]);
 
   return (
     <SafeAreaProvider>

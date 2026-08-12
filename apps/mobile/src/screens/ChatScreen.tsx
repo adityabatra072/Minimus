@@ -11,11 +11,12 @@ import {
 } from 'react-native';
 import { AgentLoop, type AgentEvent, type ToolCall } from '@minimus/agent-core';
 import { LocalAdapter } from '../services/LocalAdapter';
-import { buildToolRegistry } from '../tools';
+import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { verbFor, resultFor } from '../services/humanize';
 import { overlay } from '../services/overlay';
 import { scheduler } from '../services/scheduler';
+import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
 import { ActionRail, type Operation } from '../components/ActionRail';
@@ -52,7 +53,7 @@ let idCounter = 0;
 const idSeed = Date.now().toString(36);
 const nextId = () => `i${idSeed}_${++idCounter}`;
 
-const registry = buildToolRegistry();
+const registry = getToolRegistry();
 
 const SUGGESTIONS = [
   'Turn on the flashlight',
@@ -312,7 +313,9 @@ export default function ChatScreen({
     });
     scheduler.start();
     void scheduler.tick();
-    return () => scheduler.stop();
+    // Hand back to the headless runner rather than stopping the scheduler —
+    // leaving this screen must not cancel a task the user already armed.
+    return () => scheduler.setRunner(runAgentHeadless);
   }, [run]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);

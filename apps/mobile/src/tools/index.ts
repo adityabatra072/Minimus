@@ -14,6 +14,18 @@ import { bindMacroRegistry, macroTools } from './macroTools';
  * audience) that the agent is broken. As native modules land, their tools
  * join here.
  */
+let shared: ToolRegistry | null = null;
+
+/**
+ * The one registry for the whole app. Screens must not build their own:
+ * macros bind to a registry to execute their steps, so a second instance
+ * would leave taught verbs running against a different tool set.
+ */
+export function getToolRegistry(): ToolRegistry {
+  if (!shared) shared = buildToolRegistry();
+  return shared;
+}
+
 export function buildToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   const hasNativeTools = Boolean((NativeModules as Record<string, unknown>)['MinimusTools']);
