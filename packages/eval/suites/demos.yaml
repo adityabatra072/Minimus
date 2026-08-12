@@ -46,6 +46,15 @@ scenarios:
   - id: teach-macro
     prompt: "New rule: when I say wind down, set the brightness to 20 percent, turn the flashlight off, and remind me to set my alarm."
     tools: [core, device, schedule]
+    # mirrors the app: teaching intent is detected and stated up front, because
+    # a sentence full of imperatives ("set…", "turn off…") otherwise makes a
+    # 2.6B perform the actions instead of recording them
+    preamble: >-
+      You are Minimus, running entirely on this phone.
+
+      The user is TEACHING you a phrase, not asking you to act. You MUST call
+      define_macro exactly once, with the phrase as `name` and every action as a
+      step in `steps`. Do NOT perform any of the actions now.
     expect:
       calls:
         - tool: define_macro

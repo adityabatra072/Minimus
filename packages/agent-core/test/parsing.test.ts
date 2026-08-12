@@ -98,6 +98,36 @@ describe('pythonic (LFM) format', () => {
     });
   });
 
+  it('parses nested step objects with Python literals (taught-verb payload)', () => {
+    // Verbatim shape LFM2.5 emits for define_macro. A naive quote swap makes
+    // JSON.parse choke on `False`, which silently dropped the entire call.
+    const out = parseAssistantOutput(
+      "<|tool_call_start|>[define_macro(name='wind down', steps=[{'tool': 'set_brightness', " +
+        "'arguments': {'level': 0.2}}, {'tool': 'flashlight', 'arguments': {'on': False}}, " +
+        "{'tool': 'remember', 'arguments': {'fact': 'set my alarm'}}])]<|tool_call_end|>",
+      'pythonic',
+      ['define_macro'],
+    );
+    expect(out.calls).toHaveLength(1);
+    expect(out.calls[0]!.name).toBe('define_macro');
+    expect(out.calls[0]!.arguments['name']).toBe('wind down');
+    const steps = out.calls[0]!.arguments['steps'] as { tool: string; arguments: Record<string, unknown> }[];
+    expect(steps).toHaveLength(3);
+    expect(steps[1]!.tool).toBe('flashlight');
+    expect(steps[1]!.arguments['on']).toBe(false);
+    expect(steps[2]!.arguments['fact']).toBe('set my alarm');
+  });
+
+  it('keeps Python keywords and quotes that appear inside string values', () => {
+    const out = parseAssistantOutput(
+      "[remember(fact='She said False alarm, don\\'t worry')]",
+      'pythonic',
+      ['remember'],
+    );
+    expect(out.calls).toHaveLength(1);
+    expect(out.calls[0]!.arguments['fact']).toBe("She said False alarm, don't worry");
+  });
+
   it('does NOT treat unknown bare brackets or citations as calls', () => {
     const out = parseAssistantOutput(
       'Studies [see note(1)] disagree. Also [not_a_tool(x=1)] happens.',

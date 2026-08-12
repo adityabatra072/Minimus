@@ -81,6 +81,52 @@ function tryParseJsonCall(jsonText: string): ParsedCall | null {
 }
 
 /**
+ * Convert a Python-flavoured literal to JSON: single-quoted strings and the
+ * `True`/`False`/`None` keywords.
+ *
+ * Naive `.replace(/'/g, '"')` is not enough and the difference is not
+ * cosmetic: LFM2.5 emits nested arguments as
+ * `steps=[{'tool': 'flashlight', 'arguments': {'on': False}}]`, and a bare
+ * `False` makes JSON.parse throw — which silently dropped the whole tool call
+ * and made a correct model look broken. Walks the string so quotes and
+ * keywords inside string values are left alone.
+ */
+function pythonishToJson(src: string): string {
+  let out = '';
+  let quote: string | null = null;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (quote) {
+      if (c === '\\') {
+        out += c + (src[i + 1] ?? '');
+        i++;
+      } else if (c === quote) {
+        out += '"';
+        quote = null;
+      } else if (c === '"') {
+        out += '\\"'; // inner double quote inside a single-quoted string
+      } else {
+        out += c;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      out += '"';
+      continue;
+    }
+    const keyword = /^(True|False|None)\b/.exec(src.slice(i))?.[1];
+    if (keyword) {
+      out += keyword === 'True' ? 'true' : keyword === 'False' ? 'false' : 'null';
+      i += keyword.length - 1;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+/**
  * Parse one pythonic call `func(a="x", b=2)` (LFM wire format).
  * Values: single/double-quoted strings, numbers, true/false/null, and
  * conservative bare words (treated as strings).
@@ -142,9 +188,8 @@ function tryParsePythonicCall(src: string): ParsedCall | null {
         }
         i++;
       }
-      const literal = argsSrc.slice(start, i).replace(/'/g, '"');
       try {
-        args[key] = JSON.parse(literal);
+        args[key] = JSON.parse(pythonishToJson(argsSrc.slice(start, i)));
       } catch {
         return null;
       }
