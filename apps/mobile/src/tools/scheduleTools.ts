@@ -135,7 +135,7 @@ export function scheduleTools(): ToolDefinition[] {
       description:
         'Schedule yourself to act later: at the given time you wake up with every tool available and carry out the instruction.',
       usageHint:
-        'ANY request of the form "in N minutes / later / at TIME, check X" or "tell me if Y" or "do Z" → schedule_task. set_timer and set_alarm only ring a bell; they cannot check a value, compare it, decide anything, or tell the user something.',
+        'ANY request of the form "in N minutes / later / at TIME, check X" or "tell me if Y" → schedule_task. set_timer and set_alarm only ring a bell; they cannot check, compare or decide. Putting an event or time block ON THE CALENDAR is calendar_create, never schedule_task.',
       parameters: {
         type: 'object',
         properties: {
@@ -207,7 +207,7 @@ export function scheduleTools(): ToolDefinition[] {
     {
       name: 'calendar_create',
       group: 'schedule',
-      description: 'Create a calendar event',
+      description: 'Book an event or block time on the calendar',
       parameters: {
         type: 'object',
         properties: {

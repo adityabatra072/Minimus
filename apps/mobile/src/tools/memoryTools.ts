@@ -68,6 +68,8 @@ export function memoryTools(): ToolDefinition[] {
       name: 'recall',
       group: 'core',
       description: 'Search on-device memory for previously saved facts',
+      usageHint:
+        'recall is for finding saved information. If the user says a phrase they TAUGHT you, that is run_macro, not recall.',
       parameters: {
         type: 'object',
         properties: {

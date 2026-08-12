@@ -203,7 +203,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'calendar_create',
     group: 'schedule',
-    description: 'Create a calendar event',
+    description: 'Book an event or block time on the calendar',
     parameters: {
       type: 'object',
       properties: {
@@ -265,7 +265,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     description:
       'Schedule the assistant itself to act later: at the given time it wakes up with ALL tools (battery, web, notifications, music, …) and performs the instruction.',
     usageHint:
-      'ANY request of the form "in N minutes / later / at TIME, check X" or "tell me if Y" or "do Z" → schedule_task. set_timer and set_alarm only ring a bell; they cannot check a value, compare it, decide anything, or tell the user something.',
+      'ANY request of the form "in N minutes / later / at TIME, check X" or "tell me if Y" → schedule_task. set_timer and set_alarm only ring a bell; they cannot check, compare or decide. Putting an event or time block ON THE CALENDAR is calendar_create, never schedule_task.',
     parameters: {
       type: 'object',
       properties: {
@@ -384,6 +384,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     name: 'recall',
     group: 'core',
     description: 'Search on-device memory for previously saved facts',
+    usageHint:
+      'recall is for finding saved information. If the user says a phrase they TAUGHT you, that is run_macro, not recall.',
     parameters: {
       type: 'object',
       properties: { query: { type: 'string', description: 'what to look for' } },
