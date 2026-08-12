@@ -19,6 +19,9 @@ end
 target 'mobile' do
   config = use_native_modules!
 
+  # Native phone-control tools (torch, brightness, EventKit, notifications).
+  pod 'MinimusTools', :path => './MinimusTools'
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.

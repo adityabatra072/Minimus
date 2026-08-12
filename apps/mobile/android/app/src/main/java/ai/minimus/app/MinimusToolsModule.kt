@@ -14,6 +14,7 @@ import android.provider.CalendarContract
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -192,6 +193,46 @@ class MinimusToolsModule(private val ctx: ReactApplicationContext) :
             promise.resolve("editor_opened")
         } catch (e: Exception) {
             promise.reject("calendar_failed", "Could not create the event: ${e.message}")
+        }
+    }
+
+    /** Events overlapping [startMillis, endMillis], for gap analysis in JS. */
+    @ReactMethod
+    fun calendarQuery(startMillis: Double, endMillis: Double, promise: Promise) {
+        try {
+            if (ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_CALENDAR) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                promise.reject(
+                    "no_permission",
+                    "Calendar access not granted — ask the user to allow calendar access for this app.",
+                )
+                return
+            }
+            val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
+                .appendPath(startMillis.toLong().toString())
+                .appendPath(endMillis.toLong().toString())
+                .build()
+            val projection = arrayOf(
+                CalendarContract.Instances.TITLE,
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.END,
+            )
+            val events = Arguments.createArray()
+            ctx.contentResolver.query(
+                uri, projection, null, null, CalendarContract.Instances.BEGIN + " ASC",
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val map = Arguments.createMap()
+                    map.putString("title", cursor.getString(0) ?: "(untitled)")
+                    map.putDouble("startMillis", cursor.getLong(1).toDouble())
+                    map.putDouble("endMillis", cursor.getLong(2).toDouble())
+                    events.pushMap(map)
+                }
+            }
+            promise.resolve(events)
+        } catch (e: Exception) {
+            promise.reject("calendar_failed", "Could not read the calendar: ${e.message}")
         }
     }
 

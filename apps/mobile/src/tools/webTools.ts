@@ -15,7 +15,7 @@ function decodeEntities(s: string): string {
     .replace(/&#x?\d+;/g, ' ');
 }
 
-async function ddgLiteSearch(query: string, signal: AbortSignal) {
+export async function ddgLiteSearch(query: string, signal: AbortSignal) {
   const res = await fetch(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, {
     headers: { 'user-agent': 'Mozilla/5.0 (iPhone; like Mac OS X) minimus/0.1' },
     signal,

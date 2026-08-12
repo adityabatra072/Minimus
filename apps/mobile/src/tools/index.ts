@@ -4,6 +4,9 @@ import { deviceTools } from './deviceTools';
 import { webTools } from './webTools';
 import { scheduleTools } from './scheduleTools';
 import { commsTools } from './commsTools';
+import { musicTools } from './musicTools';
+import { memoryTools } from './memoryTools';
+import { bindMacroRegistry, macroTools } from './macroTools';
 
 /**
  * Build the live tool registry for this device. Only WORKING tools get
@@ -18,9 +21,14 @@ export function buildToolRegistry(): ToolRegistry {
     ...deviceTools(),
     ...webTools(),
     ...commsTools(),
+    ...musicTools(),
+    ...memoryTools(),
+    ...macroTools(),
     ...(hasNativeTools ? scheduleTools() : []),
   ]) {
     registry.register(tool);
   }
+  // Macros execute other tools, so they need the finished registry.
+  bindMacroRegistry(() => registry);
   return registry;
 }

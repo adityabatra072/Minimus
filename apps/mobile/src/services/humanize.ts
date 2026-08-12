@@ -53,6 +53,10 @@ export function verbFor(call: ToolCall): string {
       return `Calling ${str(a['to'], '…')}`;
     case 'run_js':
       return 'Running code';
+    case 'remember':
+      return 'Saving to memory';
+    case 'recall':
+      return `Searching memory for “${str(a['query'], '…')}”`;
     default:
       return call.name.replace(/_/g, ' ');
   }
@@ -103,7 +107,13 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
     case 'clipboard_write':
       return 'Copied';
     case 'play_music':
-      return 'Playing';
+      return r['now_playing'] ? `Playing ${str(r['now_playing'])}` : 'Opened in Spotify';
+    case 'remember':
+      return 'Saved on this phone';
+    case 'recall': {
+      const matches = Array.isArray(r['matches']) ? r['matches'].length : 0;
+      return matches > 0 ? `${matches} memory match${matches === 1 ? '' : 'es'}` : 'Nothing saved yet';
+    }
     case 'send_email':
     case 'send_sms':
       return 'Ready to send';

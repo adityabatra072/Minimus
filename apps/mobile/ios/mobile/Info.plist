@@ -26,6 +26,21 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+		<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>The agent adds events you ask for to your calendar.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>The agent adds events you ask for to your calendar.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>spotify</string>
+		<string>youtube</string>
+		<string>whatsapp</string>
+		<string>googlechrome</string>
+		<string>maps</string>
+		<string>camera</string>
+		<string>photos-redirect</string>
+		<string>message</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
@@ -15,6 +15,7 @@ import { buildToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { verbFor, resultFor } from '../services/humanize';
 import { overlay } from '../services/overlay';
+import { scheduler } from '../services/scheduler';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -31,6 +32,7 @@ import { color, font, space } from '../theme';
 
 type Item =
   | { kind: 'user'; id: string; text: string }
+  | { kind: 'scheduled'; id: string; text: string }
   | { kind: 'agent'; id: string; text: string }
   | { kind: 'rail'; id: string; ops: Operation[] }
   | {
@@ -83,6 +85,7 @@ export default function ChatScreen({
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
   const [working, setWorking] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Item>>(null);
@@ -91,15 +94,19 @@ export default function ChatScreen({
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
 
   const run = useCallback(
-    async (prompt: string) => {
-      if (!prompt.trim() || running) return;
-      setInput('');
+    async (prompt: string, origin: 'user' | 'scheduled' = 'user'): Promise<string> => {
+      if (!prompt.trim() || runningRef.current) return '';
+      runningRef.current = true;
+      if (origin === 'user') setInput('');
       setRunning(true);
       setWorking(true);
       const abort = new AbortController();
       abortRef.current = abort;
 
-      setItems((prev) => [...prev, { kind: 'user', id: nextId(), text: prompt.trim() }]);
+      setItems((prev) => [
+        ...prev,
+        { kind: origin === 'scheduled' ? 'scheduled' : 'user', id: nextId(), text: prompt.trim() },
+      ]);
       scrollDown();
 
       const adapter = new LocalAdapter(activeModelId);
@@ -108,6 +115,7 @@ export default function ChatScreen({
       let railId: string | null = null;
       let saidAnything = false;
       let lastOpSummary = '';
+      let finalText = '';
 
       const upsertRail = (mutate: (ops: Operation[]) => Operation[]) => {
         setItems((prev) => {
@@ -168,11 +176,13 @@ export default function ChatScreen({
           },
         ]);
       } finally {
+        runningRef.current = false;
         setRunning(false);
         setWorking(false);
         abortRef.current = null;
         scrollDown();
       }
+      return finalText;
 
       function handle(ev: AgentEvent) {
         switch (ev.type) {
@@ -227,6 +237,7 @@ export default function ChatScreen({
             }
             break;
           case 'run_finished':
+            finalText = ev.finalText || (lastOpSummary ? `Done — ${lastOpSummary.toLowerCase()}.` : '');
             if (ev.reason === 'completed' && !saidAnything && lastOpSummary) {
               // The model acted but never spoke — close the loop honestly
               // with the last operation's result.
@@ -258,6 +269,20 @@ export default function ChatScreen({
     },
     [running, activeModelId],
   );
+
+  // Deferred agency: when a scheduled task comes due the scheduler runs a
+  // full agent loop through this same path, so the audience watches it think.
+  useEffect(() => {
+    scheduler.setRunner(async (instruction) => {
+      for (let waited = 0; runningRef.current && waited < 120_000; waited += 500) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return run(instruction, 'scheduled');
+    });
+    scheduler.start();
+    void scheduler.tick();
+    return () => scheduler.stop();
+  }, [run]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
@@ -368,6 +393,13 @@ function ItemView({ item }: { item: Item }): React.JSX.Element | null {
           <Text style={styles.userText}>{item.text}</Text>
         </View>
       );
+    case 'scheduled':
+      return (
+        <View style={styles.scheduledPill}>
+          <Text style={styles.scheduledLabel}>scheduled task · running now</Text>
+          <Text style={styles.scheduledText}>{item.text}</Text>
+        </View>
+      );
     case 'agent':
       return (
         <FadeIn>
@@ -455,6 +487,26 @@ const styles = StyleSheet.create({
     marginTop: space(2),
   },
   userText: { color: color.text, fontSize: 15, lineHeight: 21 },
+  scheduledPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: color.bg1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: color.amberDeep,
+    paddingHorizontal: space(3.5),
+    paddingVertical: space(2.5),
+    maxWidth: '92%',
+    marginTop: space(2),
+    gap: space(1),
+  },
+  scheduledLabel: {
+    color: color.amber,
+    fontFamily: font.mono,
+    fontSize: 10,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  scheduledText: { color: color.text, fontSize: 14, lineHeight: 20 },
 
   agentBlock: { marginTop: space(1) },
 
