@@ -5,6 +5,7 @@ import { initSdk } from './src/services/sdk';
 import SetupScreen from './src/screens/SetupScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import ModelsScreen from './src/screens/ModelsScreen';
+import RehearsalScreen from './src/screens/RehearsalScreen';
 import { useModelStore } from './src/stores/modelStore';
 
 type AppState = 'initializing' | 'setup' | 'ready' | 'error';
@@ -13,6 +14,7 @@ export default function App(): React.JSX.Element {
   const [state, setState] = useState<AppState>('initializing');
   const [error, setError] = useState('');
   const [showModels, setShowModels] = useState(false);
+  const [showRehearsal, setShowRehearsal] = useState(false);
 
   const boot = useCallback(async () => {
     setState('initializing');
@@ -44,8 +46,13 @@ export default function App(): React.JSX.Element {
         {state === 'ready' &&
           (showModels ? (
             <ModelsScreen onClose={() => setShowModels(false)} />
+          ) : showRehearsal ? (
+            <RehearsalScreen onClose={() => setShowRehearsal(false)} />
           ) : (
-            <ChatScreen onOpenModels={() => setShowModels(true)} />
+            <ChatScreen
+              onOpenModels={() => setShowModels(true)}
+              onOpenRehearsal={() => setShowRehearsal(true)}
+            />
           ))}
         {state === 'error' && (
           <View style={styles.center}>

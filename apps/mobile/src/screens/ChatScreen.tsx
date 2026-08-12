@@ -80,8 +80,10 @@ function approvalSummary(call: ToolCall): { title: string; detail: string } {
 
 export default function ChatScreen({
   onOpenModels,
+  onOpenRehearsal,
 }: {
   onOpenModels?: () => void;
+  onOpenRehearsal?: () => void;
 }): React.JSX.Element {
   const activeModelId = useModelStore((s) => s.activeModelId);
   const [items, setItems] = useState<Item[]>([]);
@@ -320,7 +322,7 @@ export default function ChatScreen({
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Header onOpenModels={onOpenModels} />
+      <Header onOpenModels={onOpenModels} onOpenRehearsal={onOpenRehearsal} />
       {items.length === 0 ? (
         <EmptyState onPick={(s) => void run(s)} />
       ) : (
@@ -345,7 +347,13 @@ export default function ChatScreen({
   );
 }
 
-function Header({ onOpenModels }: { onOpenModels?: () => void }): React.JSX.Element {
+function Header({
+  onOpenModels,
+  onOpenRehearsal,
+}: {
+  onOpenModels?: () => void;
+  onOpenRehearsal?: () => void;
+}): React.JSX.Element {
   const activeModelId = useModelStore((s) => s.activeModelId);
   const modelLabel = activeModelId.replace(/-(ud-)?q\d.*$/i, '').replace(/-/g, ' ');
   const [bubbleOn, setBubbleOn] = useState(false);
@@ -369,6 +377,11 @@ function Header({ onOpenModels }: { onOpenModels?: () => void }): React.JSX.Elem
         minimus<Text style={styles.wordmarkDot}> ●</Text>
       </Text>
       <View style={styles.headerRight}>
+        {onOpenRehearsal ? (
+          <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenRehearsal} hitSlop={8}>
+            <Text style={styles.rehearseGlyph}>✓</Text>
+          </TouchableOpacity>
+        ) : null}
         {overlay.available() ? (
           <TouchableOpacity
             style={[styles.bubbleBtn, bubbleOn && styles.bubbleBtnOn]}
@@ -488,6 +501,7 @@ const styles = StyleSheet.create({
   bubbleBtnOn: { borderColor: color.amberDeep },
   bubbleGlyph: { width: 10, height: 10, borderRadius: 5, backgroundColor: color.faint },
   bubbleGlyphOn: { backgroundColor: color.amber },
+  rehearseGlyph: { color: color.faint, fontSize: 14, fontWeight: '700' },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
