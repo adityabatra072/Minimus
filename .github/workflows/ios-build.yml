@@ -11,8 +11,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'apps/mobile/ios/**'
-      - 'apps/mobile/package.json'
+      # The JS bundle is embedded in the Release IPA, so app and harness
+      # changes must produce a new build too — not just native ones.
+      - 'apps/mobile/**'
+      - 'packages/**'
+      - 'package.json'
       - '.github/workflows/ios-build.yml'
 
 concurrency:
