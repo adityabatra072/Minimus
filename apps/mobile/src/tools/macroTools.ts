@@ -58,9 +58,9 @@ export function macroTools(): ToolDefinition[] {
       name: 'define_macro',
       group: 'core',
       description:
-        'Teach a new phrase that runs several actions at once. Give the phrase a name and the exact list of tool calls it should perform.',
+        'Record a phrase the user is teaching you, together with the actions it should perform later. Recording only — the actions do NOT happen now.',
       usageHint:
-        'When the user says "when I say X, do A and B" or "new rule: …", call define_macro(name="X", steps=[{"tool":"...","arguments":{...}}, …]). Saying that phrase later runs it with run_macro.',
+        'When the user says "when I say X, …" or "new rule: …" they are TEACHING you a phrase, not asking you to act now. Do NOT perform the actions. Call define_macro once with name="X" and every step in the list.',
       parameters: {
         type: 'object',
         properties: {
@@ -105,6 +105,8 @@ export function macroTools(): ToolDefinition[] {
       name: 'run_macro',
       group: 'core',
       description: 'Run a phrase the user taught earlier (performs all of its actions)',
+      usageHint:
+        'If the user says a short phrase they previously taught you, call run_macro with that phrase — do not perform the actions individually.',
       parameters: {
         type: 'object',
         properties: {

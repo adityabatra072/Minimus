@@ -24,7 +24,6 @@ const CANNED: Record<string, unknown> = {
   device_info: { battery_percent: 78, network: 'wifi', storage_free_gb: 42.5 },
   fetch_page: { text: 'Night Mode is the latest single by Drake, released August 8, 2026.' },
   calendar_create: { ok: true, event_id: 'evt_123' },
-  create_reminder: { ok: true, reminder_id: 'rem_1' },
   set_alarm: { ok: true, alarm_id: 'alm_1' },
   set_timer: { ok: true, timer_id: 'tmr_1' },
   schedule_task: { ok: true, task_id: 'tsk_1' },
@@ -231,24 +230,10 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     execute: record('calendar_query'),
   });
   registry.register({
-    name: 'create_reminder',
-    group: 'schedule',
-    description:
-      'Create a simple reminder that shows a fixed message at a time. It cannot check anything or perform actions — for "do/check X later" use schedule_task instead.',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string' },
-        when: { type: 'string', description: 'ISO 8601 datetime for the reminder' },
-      },
-      required: ['title', 'when'],
-    },
-    execute: record('create_reminder'),
-  });
-  registry.register({
     name: 'set_alarm',
     group: 'schedule',
-    description: 'Set an alarm clock at a time of day',
+    description:
+      'Set an alarm clock that rings at a time of day. It only rings — it cannot check or do anything.',
     parameters: {
       type: 'object',
       properties: {
@@ -262,7 +247,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'set_timer',
     group: 'schedule',
-    description: 'Start a countdown timer',
+    description:
+      'Start a countdown timer that rings when it finishes. It only rings — it cannot check or do anything.',
     parameters: {
       type: 'object',
       properties: {
@@ -279,7 +265,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     description:
       'Schedule the assistant itself to act later: at the given time it wakes up with ALL tools (battery, web, notifications, music, …) and performs the instruction.',
     usageHint:
-      'schedule_task is ONLY for deferred assistant actions ("in 30 min check my battery", "at 6pm search X"). Wake-up alarms → set_alarm. Countdown timers → set_timer. Fixed-message reminders → create_reminder.',
+      'ANY request of the form "in N minutes / later / at TIME, check X" or "tell me if Y" or "do Z" → schedule_task. set_timer and set_alarm only ring a bell; they cannot check a value, compare it, decide anything, or tell the user something.',
     parameters: {
       type: 'object',
       properties: {
@@ -385,6 +371,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     name: 'remember',
     group: 'core',
     description: 'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
+    usageHint:
+      'remember stores INFORMATION to answer questions later. If the user is instead describing a phrase that should PERFORM actions ("when I say X, do Y and Z", "new rule: …"), that is define_macro, not remember.',
     parameters: {
       type: 'object',
       properties: { fact: { type: 'string', description: 'the fact to remember, phrased plainly' } },
@@ -409,9 +397,9 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     name: 'define_macro',
     group: 'core',
     description:
-      'Teach a new phrase that runs several actions at once. Give the phrase a name and the exact list of tool calls it should perform.',
+      'Record a phrase the user is teaching you, together with the actions it should perform later. Recording only — the actions do NOT happen now.',
     usageHint:
-      '"when I say X, do A and B" or "new rule: …" → define_macro(name="X", steps=[{"tool":"...","arguments":{...}}, …]).',
+      'When the user says "when I say X, …" or "new rule: …" they are TEACHING you a phrase, not asking you to act now. Do NOT perform the actions. Call define_macro once with name="X" and every step in the list.',
     parameters: {
       type: 'object',
       properties: {
@@ -430,6 +418,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     name: 'run_macro',
     group: 'core',
     description: 'Run a phrase the user taught earlier (performs all of its actions)',
+    usageHint:
+      'If the user says a short phrase they previously taught you, call run_macro with that phrase — do not perform the actions individually.',
     parameters: {
       type: 'object',
       properties: { name: { type: 'string', description: 'the taught phrase' } },

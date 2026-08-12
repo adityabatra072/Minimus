@@ -36,6 +36,12 @@ export interface Scenario {
   id: string;
   prompt: string;
   tools?: string[];
+  /**
+   * Extra system-prompt context the app would inject at this point (e.g. the
+   * list of phrases the user has taught). Without it the eval measures a
+   * different agent than the one that ships.
+   */
+  preamble?: string;
   /** Scripted results keyed by tool name — overrides the mock default. */
   tool_results?: Record<string, unknown>;
   expect: ScenarioExpectation;

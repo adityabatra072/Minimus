@@ -75,7 +75,8 @@ export function scheduleTools(): ToolDefinition[] {
     {
       name: 'set_alarm',
       group: 'schedule',
-      description: 'Set an alarm clock at a time of day',
+      description:
+        'Set an alarm clock that rings at a time of day. It only rings — it cannot check or do anything.',
       parameters: {
         type: 'object',
         properties: {
@@ -94,7 +95,8 @@ export function scheduleTools(): ToolDefinition[] {
     {
       name: 'set_timer',
       group: 'schedule',
-      description: 'Start a countdown timer',
+      description:
+        'Start a countdown timer that rings when it finishes. It only rings — it cannot check or do anything.',
       parameters: {
         type: 'object',
         properties: {
@@ -133,7 +135,7 @@ export function scheduleTools(): ToolDefinition[] {
       description:
         'Schedule yourself to act later: at the given time you wake up with every tool available and carry out the instruction.',
       usageHint:
-        '"in N minutes / at TIME, check or do something" → schedule_task(instruction, when="+N" or "HH:MM"). Use this instead of set_timer or create_reminder whenever the later step needs checking, deciding or acting.',
+        'ANY request of the form "in N minutes / later / at TIME, check X" or "tell me if Y" or "do Z" → schedule_task. set_timer and set_alarm only ring a bell; they cannot check a value, compare it, decide anything, or tell the user something.',
       parameters: {
         type: 'object',
         properties: {

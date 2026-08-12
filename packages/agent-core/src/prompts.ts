@@ -19,7 +19,11 @@ function toolLine(tool: ToolDefinition): string {
         })
         .join('; ')
     : '';
-  return `- ${tool.name}(${params}): ${tool.description}`;
+  const line = `- ${tool.name}(${params}): ${tool.description}`;
+  // A hint bound to its own tool line is read; the same text in a trailing
+  // section gets skimmed past by small models.
+  return tool.usageHint ? `${line}
+    ↳ ${tool.usageHint}` : line;
 }
 
 export interface PromptOptions {

@@ -23,6 +23,7 @@ interface Args {
   repeats: number;
   json?: string;
   verbose: boolean;
+  only?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -42,10 +43,11 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--server-model') args.serverModel = next();
     else if (a === '--repeats') args.repeats = Number(next());
     else if (a === '--json') args.json = next();
+    else if (a === '--only') args.only = next();
     else if (a === '--verbose' || a === '-v') args.verbose = true;
     else if (a === '--help' || a === '-h') {
       console.log(
-        'usage: eval --suite <name> --endpoint <url> --model <policy-id> [--server-model <name>] [--repeats N] [--json out.json] [-v]',
+        'usage: eval --suite <name> --endpoint <url> --model <policy-id> [--server-model <name>] [--repeats N] [--only id,id] [--json out.json] [-v]',
       );
       process.exit(0);
     }
@@ -58,6 +60,14 @@ async function main() {
   const here = dirname(fileURLToPath(import.meta.url));
   const suitePath = resolve(here, '..', 'suites', `${args.suite}.yaml`);
   const suite = parseSuite(readFileSync(suitePath, 'utf8'));
+  if (args.only) {
+    const wanted = new Set(args.only.split(','));
+    suite.scenarios = suite.scenarios.filter((s) => wanted.has(s.id));
+    if (suite.scenarios.length === 0) {
+      console.error(`no scenarios matched --only ${args.only}`);
+      process.exit(1);
+    }
+  }
 
   const adapter = new OpenAIAdapter(
     {

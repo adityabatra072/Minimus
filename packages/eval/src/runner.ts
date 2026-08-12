@@ -59,6 +59,7 @@ export async function runScenario(
     approvals: async () => options.autoApprove !== false,
     ...(options.policy ? { policy: options.policy } : {}),
     ...(scenario.tools ? { toolGroups: scenario.tools } : {}),
+    ...(scenario.preamble ? { preamble: scenario.preamble } : {}),
   };
   for await (const ev of loop.run(scenario.prompt, runConfig)) {
     events.push(ev);

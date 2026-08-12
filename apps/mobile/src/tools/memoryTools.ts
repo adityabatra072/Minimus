@@ -39,6 +39,8 @@ export function memoryTools(): ToolDefinition[] {
       name: 'remember',
       group: 'core',
       description: 'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
+      usageHint:
+        'remember stores INFORMATION to answer questions later. If the user is instead describing a phrase that should PERFORM actions ("when I say X, do Y and Z", "new rule: …"), that is define_macro, not remember.',
       parameters: {
         type: 'object',
         properties: {

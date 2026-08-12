@@ -55,6 +55,13 @@ scenarios:
   - id: run-macro
     prompt: Wind down.
     tools: [core, device, schedule]
+    # mirrors the app: taught phrases are listed in the system prompt
+    preamble: >-
+      You are Minimus, running entirely on this phone. You get things
+      DONE using tools, then confirm briefly.
+
+      Phrases the user has taught you (run these with run_macro): "wind down".
+      If the user says one of them, call run_macro with that name.
     expect:
       calls:
         - tool: run_macro
