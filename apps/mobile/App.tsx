@@ -6,22 +6,30 @@ import SetupScreen from './src/screens/SetupScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import ModelsScreen from './src/screens/ModelsScreen';
 import RehearsalScreen from './src/screens/RehearsalScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import HistoryScreen from './src/screens/HistoryScreen';
 import { useModelStore } from './src/stores/modelStore';
+import { useSettingsStore } from './src/stores/settingsStore';
+import { useSessionStore } from './src/stores/sessionStore';
 import { scheduler } from './src/services/scheduler';
 import { runAgentHeadless } from './src/services/headlessAgent';
 
 type AppState = 'initializing' | 'setup' | 'ready' | 'error';
+type Overlay = 'none' | 'models' | 'rehearsal' | 'settings' | 'history';
 
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<AppState>('initializing');
   const [error, setError] = useState('');
-  const [showModels, setShowModels] = useState(false);
-  const [showRehearsal, setShowRehearsal] = useState(false);
+  const [overlayScreen, setOverlayScreen] = useState<Overlay>('none');
 
   const boot = useCallback(async () => {
     setState('initializing');
     try {
-      await useModelStore.getState().hydrate();
+      await Promise.all([
+        useModelStore.getState().hydrate(),
+        useSettingsStore.getState().hydrate(),
+        useSessionStore.getState().hydrate(),
+      ]);
       await initSdk();
       setState('setup');
     } catch (e) {
@@ -56,14 +64,29 @@ export default function App(): React.JSX.Element {
         )}
         {state === 'setup' && <SetupScreen onReady={() => setState('ready')} />}
         {state === 'ready' &&
-          (showModels ? (
-            <ModelsScreen onClose={() => setShowModels(false)} />
-          ) : showRehearsal ? (
-            <RehearsalScreen onClose={() => setShowRehearsal(false)} />
+          (overlayScreen === 'models' ? (
+            <ModelsScreen onClose={() => setOverlayScreen('none')} />
+          ) : overlayScreen === 'rehearsal' ? (
+            <RehearsalScreen onClose={() => setOverlayScreen('none')} />
+          ) : overlayScreen === 'settings' ? (
+            <SettingsScreen
+              onClose={() => setOverlayScreen('none')}
+              onOpenModels={() => setOverlayScreen('models')}
+            />
+          ) : overlayScreen === 'history' ? (
+            <HistoryScreen
+              onClose={() => setOverlayScreen('none')}
+              onPick={(id) => {
+                useSessionStore.setState({ activeSessionId: id });
+                setOverlayScreen('none');
+              }}
+            />
           ) : (
             <ChatScreen
-              onOpenModels={() => setShowModels(true)}
-              onOpenRehearsal={() => setShowRehearsal(true)}
+              onOpenModels={() => setOverlayScreen('models')}
+              onOpenRehearsal={() => setOverlayScreen('rehearsal')}
+              onOpenSettings={() => setOverlayScreen('settings')}
+              onOpenHistory={() => setOverlayScreen('history')}
             />
           ))}
         {state === 'error' && (

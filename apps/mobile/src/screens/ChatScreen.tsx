@@ -12,8 +12,11 @@ import {
 } from 'react-native';
 import { AgentLoop, type AgentEvent, type ToolCall } from '@minimus/agent-core';
 import { LocalAdapter } from '../services/LocalAdapter';
+import { RemoteAdapter } from '../services/RemoteAdapter';
 import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useSessionStore, type SessionMessage } from '../stores/sessionStore';
 import { verbFor, resultFor } from '../services/humanize';
 import { overlay } from '../services/overlay';
 import { scheduler } from '../services/scheduler';
@@ -115,11 +118,18 @@ function approvalSummary(call: ToolCall): { title: string; detail: string } {
 export default function ChatScreen({
   onOpenModels,
   onOpenRehearsal,
+  onOpenSettings,
+  onOpenHistory,
 }: {
   onOpenModels?: () => void;
   onOpenRehearsal?: () => void;
+  onOpenSettings?: () => void;
+  onOpenHistory?: () => void;
 }): React.JSX.Element {
   const activeModelId = useModelStore((s) => s.activeModelId);
+  const remote = useSettingsStore((s) => s.remote);
+  const requireApprovals = useSettingsStore((s) => s.requireApprovals);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -130,6 +140,39 @@ export default function ChatScreen({
 
   const scrollDown = () =>
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+
+  // Session switching: a new/reopened session replaces the visible transcript.
+  // Restored runs render as plain text — rails and approvals are live-run UI.
+  useEffect(() => {
+    let stale = false;
+    void useSessionStore
+      .getState()
+      .loadTranscript(activeSessionId)
+      .then((transcript) => {
+        if (stale) return;
+        setItems(
+          transcript.map((m): Item => {
+            if (m.kind === 'sources') {
+              let sources: Source[] = [];
+              try {
+                sources = JSON.parse(m.data ?? '[]') as Source[];
+              } catch {
+                sources = [];
+              }
+              return { kind: 'sources', id: nextId(), sources };
+            }
+            const kind = m.kind === 'user' || m.kind === 'scheduled' ? m.kind : 'agent';
+            return { kind, id: nextId(), text: m.text };
+          }),
+        );
+      });
+    return () => {
+      stale = true;
+    };
+  }, [activeSessionId]);
+
+  const persist = (messages: SessionMessage[]) =>
+    useSessionStore.getState().appendToActive(messages);
 
   const run = useCallback(
     async (prompt: string, origin: 'user' | 'scheduled' = 'user'): Promise<string> => {
@@ -145,11 +188,23 @@ export default function ChatScreen({
         ...prev,
         { kind: origin === 'scheduled' ? 'scheduled' : 'user', id: nextId(), text: prompt.trim() },
       ]);
+      persist([
+        { kind: origin === 'scheduled' ? 'scheduled' : 'user', text: prompt.trim(), atMs: Date.now() },
+      ]);
       scrollDown();
       const runStartedAt = Date.now();
-      diag(`run start (${origin}) model=${activeModelId} prompt=${JSON.stringify(prompt.trim().slice(0, 90))}`);
+      const useRemote = remote.enabled && remote.baseUrl.trim() !== '' && remote.model.trim() !== '';
+      diag(
+        `run start (${origin}) model=${useRemote ? `remote:${remote.model}` : activeModelId} prompt=${JSON.stringify(prompt.trim().slice(0, 90))}`,
+      );
 
-      const adapter = new LocalAdapter(activeModelId);
+      const adapter = useRemote
+        ? new RemoteAdapter({
+            baseUrl: remote.baseUrl.trim(),
+            ...(remote.apiKey.trim() ? { apiKey: remote.apiKey.trim() } : {}),
+            model: remote.model.trim(),
+          })
+        : new LocalAdapter(activeModelId);
       const loop = new AgentLoop();
 
       // Taught phrases have to be visible in the system prompt, or a bare
@@ -240,7 +295,9 @@ export default function ChatScreen({
           toolGroups,
           excludeTools,
           preamble: preambleLines.join('\n'),
-          approvals: (req) => askApproval(req.call),
+          // Settings can waive approval prompts; denial stays the default
+          // for anything that sends on the user's behalf.
+          approvals: requireApprovals ? (req) => askApproval(req.call) : async () => true,
           signal: abort.signal,
         });
         for await (const ev of events) {
@@ -280,6 +337,7 @@ export default function ChatScreen({
             if (ev.text && (ev.toolCallCount === 0 || ev.text.length > 80)) {
               saidAnything = true;
               setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text: ev.text }]);
+              persist([{ kind: 'agent', text: ev.text, atMs: Date.now() }]);
               scrollDown();
             }
             break;
@@ -331,16 +389,16 @@ export default function ChatScreen({
             if (ev.reason === 'completed' && !saidAnything && lastOpSummary) {
               // The model acted but never spoke — close the loop honestly
               // with the last operation's result.
-              setItems((prev) => [
-                ...prev,
-                { kind: 'agent', id: nextId(), text: `Done — ${lastOpSummary.toLowerCase()}.` },
-              ]);
+              const text = `Done — ${lastOpSummary.toLowerCase()}.`;
+              setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text }]);
+              persist([{ kind: 'agent', text, atMs: Date.now() }]);
             }
             if (ev.reason === 'completed' && runSources.length > 0) {
               // The answer came from the web — show where. Tappable, honest.
-              setItems((prev) => [
-                ...prev,
-                { kind: 'sources', id: nextId(), sources: runSources.slice(0, 5) },
+              const sources = runSources.slice(0, 5);
+              setItems((prev) => [...prev, { kind: 'sources', id: nextId(), sources }]);
+              persist([
+                { kind: 'sources', text: '', data: JSON.stringify(sources), atMs: Date.now() },
               ]);
             }
             if (ev.reason === 'max_turns') {
@@ -364,7 +422,7 @@ export default function ChatScreen({
         }
       }
     },
-    [running, activeModelId],
+    [running, activeModelId, remote, requireApprovals],
   );
 
   // Deferred agency: when a scheduled task comes due the scheduler runs a
@@ -390,7 +448,13 @@ export default function ChatScreen({
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Header onOpenModels={onOpenModels} onOpenRehearsal={onOpenRehearsal} />
+      <Header
+        onOpenModels={onOpenModels}
+        onOpenRehearsal={onOpenRehearsal}
+        onOpenSettings={onOpenSettings}
+        onOpenHistory={onOpenHistory}
+        onNewChat={running ? undefined : () => useSessionStore.getState().newSession()}
+      />
       {items.length === 0 ? (
         <EmptyState onPick={(s) => void run(s)} />
       ) : (
@@ -418,12 +482,22 @@ export default function ChatScreen({
 function Header({
   onOpenModels,
   onOpenRehearsal,
+  onOpenSettings,
+  onOpenHistory,
+  onNewChat,
 }: {
   onOpenModels?: () => void;
   onOpenRehearsal?: () => void;
+  onOpenSettings?: () => void;
+  onOpenHistory?: () => void;
+  onNewChat?: () => void;
 }): React.JSX.Element {
   const activeModelId = useModelStore((s) => s.activeModelId);
-  const modelLabel = activeModelId.replace(/-(ud-)?q\d.*$/i, '').replace(/-/g, ' ');
+  const remote = useSettingsStore((s) => s.remote);
+  const usingRemote = remote.enabled && remote.baseUrl.trim() !== '' && remote.model.trim() !== '';
+  const modelLabel = usingRemote
+    ? `${remote.model} · cloud`
+    : `${activeModelId.replace(/-(ud-)?q\d.*$/i, '').replace(/-/g, ' ')} · on-device`;
   const [bubbleOn, setBubbleOn] = useState(false);
   const toggleBubble = useCallback(async () => {
     try {
@@ -445,6 +519,21 @@ function Header({
         minimus<Text style={styles.wordmarkDot}> ●</Text>
       </Text>
       <View style={styles.headerRight}>
+        {onNewChat ? (
+          <TouchableOpacity style={styles.bubbleBtn} onPress={onNewChat} hitSlop={8}>
+            <Text style={styles.headerGlyph}>＋</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onOpenHistory ? (
+          <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenHistory} hitSlop={8}>
+            <Text style={styles.headerGlyph}>≡</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onOpenSettings ? (
+          <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenSettings} hitSlop={8}>
+            <Text style={styles.headerGlyph}>⚙</Text>
+          </TouchableOpacity>
+        ) : null}
         {onOpenRehearsal ? (
           <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenRehearsal} hitSlop={8}>
             <Text style={styles.rehearseGlyph}>✓</Text>
@@ -461,7 +550,7 @@ function Header({
         ) : null}
         <TouchableOpacity style={styles.statusPill} onPress={onOpenModels}>
           <View style={styles.statusDot} />
-          <Text style={styles.statusText}>{modelLabel} · on-device</Text>
+          <Text style={styles.statusText}>{modelLabel}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -590,6 +679,7 @@ const styles = StyleSheet.create({
   bubbleGlyph: { width: 10, height: 10, borderRadius: 5, backgroundColor: color.faint },
   bubbleGlyphOn: { backgroundColor: color.amber },
   rehearseGlyph: { color: color.faint, fontSize: 14, fontWeight: '700' },
+  headerGlyph: { color: color.faint, fontSize: 15, fontWeight: '600' },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
