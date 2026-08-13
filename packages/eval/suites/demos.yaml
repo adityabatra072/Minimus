@@ -26,6 +26,18 @@ scenarios:
   - id: watchdog-arm
     prompt: Check my battery now and remember it. Then in 3 minutes check it again and tell me if it dropped more than 2 percent.
     tools: [core, device, schedule]
+    # mirrors src\services\intent.ts: deferredPreamble() appends the steering
+    # line and deferredToolExclusions() hides the timer tools the model
+    # otherwise grabs (~1 run in 3 on the rig) for the deferred half
+    exclude_tools: [set_timer, set_alarm]
+    preamble: >-
+      You are Minimus, running entirely on this phone. You get things
+      DONE using tools, then confirm briefly.
+
+      Part of this request happens LATER. Do the immediate part now with tools,
+      then hand the later part to schedule_task (instruction = what to do, when
+      = when) — schedule_task runs YOU again at that time to do it. After
+      handing it off, give your short final answer.
     expect:
       calls:
         - tool: device_info
@@ -64,12 +76,18 @@ scenarios:
   - id: run-macro
     prompt: Wind down.
     tools: [core, device, schedule]
-    # mirrors the app: taught phrases are listed in the system prompt
+    # mirrors the app: taught phrases are listed in the system prompt, and
+    # macroSteering() hides define_macro + names the matched phrase (the model
+    # otherwise sometimes re-DEFINES the macro instead of running it)
+    exclude_tools: [define_macro]
     preamble: >-
       You are Minimus, running entirely on this phone. You get things
       DONE using tools, then confirm briefly.
 
       Phrases the user has taught you (run these with run_macro): "wind down".
+
+      The user just said the taught phrase "wind down". Call run_macro with
+      name "wind down" — do not do anything else first.
       If the user says one of them, call run_macro with that name.
     expect:
       calls:

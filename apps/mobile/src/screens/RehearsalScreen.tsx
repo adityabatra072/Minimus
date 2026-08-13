@@ -6,7 +6,12 @@ import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { loadMacros } from '../tools/macroTools';
 import { diag } from '../services/diag';
-import { teachingPreamble } from '../services/intent';
+import {
+  deferredPreamble,
+  deferredToolExclusions,
+  macroSteering,
+  teachingPreamble,
+} from '../services/intent';
 import { verbFor } from '../services/humanize';
 import { color, font, radius, space } from '../theme';
 import { LiveDot } from '../components/LiveDot';
@@ -118,14 +123,22 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
   const [busy, setBusy] = useState(false);
   const [includeFocus, setIncludeFocus] = useState(false);
   const cancelled = useRef(false);
+  const inFlight = useRef(false);
 
   const runBeat = useCallback(
     async (beat: Beat): Promise<boolean> => {
+      // The phone decodes one generation at a time — a second tap while a beat
+      // is running queues a starved run that fails as "got no tools".
+      if (inFlight.current) return false;
+      inFlight.current = true;
       const started = Date.now();
       setResults((r) => ({ ...r, [beat.id]: { status: 'running' } }));
       diag(`REHEARSAL ▶ ${beat.id}: ${JSON.stringify(beat.utterance.slice(0, 80))}`);
 
       const macros = await loadMacros().catch(() => []);
+      // Mirrors ChatScreen's preamble composition exactly — rehearsal must
+      // test the same prompt the audience-facing screen will send.
+      const macroHit = macroSteering(beat.utterance, macros.map((m) => m.name));
       const preamble = [
         'You are Minimus, running entirely on this phone. You get things DONE using tools, then confirm briefly.',
         macros.length > 0
@@ -133,9 +146,16 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
               .map((m) => `"${m.name}"`)
               .join(', ')}. If the user says one of them, call run_macro with that name.`
           : '',
+        teachingPreamble(beat.utterance) ?? '',
+        deferredPreamble(beat.utterance) ?? '',
+        macroHit?.line ?? '',
       ]
         .filter(Boolean)
         .join('\n');
+      const excludeTools = [
+        ...deferredToolExclusions(beat.utterance),
+        ...(macroHit?.exclude ?? []),
+      ];
 
       const toolsCalled: string[] = [];
       let finalText = '';
@@ -145,6 +165,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           adapter: new LocalAdapter(activeModelId),
           tools: registry,
           toolGroups: beat.toolGroups,
+          excludeTools,
           preamble,
           approvals: async () => true,
         });
@@ -163,6 +184,8 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
         }
       } catch (err) {
         failure = err instanceof Error ? err.message : String(err);
+      } finally {
+        inFlight.current = false;
       }
 
       const seconds = Math.round((Date.now() - started) / 100) / 10;

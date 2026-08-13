@@ -19,7 +19,13 @@ import { scheduler } from '../services/scheduler';
 import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
-import { routeToolGroups, teachingPreamble } from '../services/intent';
+import {
+  deferredPreamble,
+  deferredToolExclusions,
+  macroSteering,
+  routeToolGroups,
+  teachingPreamble,
+} from '../services/intent';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -140,6 +146,11 @@ export default function ChatScreen({
       }
       const teaching = teachingPreamble(prompt);
       if (teaching) preambleLines.push(teaching);
+      const deferred = deferredPreamble(prompt);
+      if (deferred) preambleLines.push(deferred);
+      const macroHit = macroSteering(prompt, macros.map((m) => m.name));
+      if (macroHit) preambleLines.push(macroHit.line);
+      const excludeTools = [...deferredToolExclusions(prompt), ...(macroHit?.exclude ?? [])];
       const toolGroups = routeToolGroups(prompt);
       diag(`tool groups: ${toolGroups.join(',')}`);
 
@@ -192,6 +203,7 @@ export default function ChatScreen({
           adapter,
           tools: registry,
           toolGroups,
+          excludeTools,
           preamble: preambleLines.join('\n'),
           approvals: (req) => askApproval(req.call),
           signal: abort.signal,

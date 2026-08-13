@@ -42,6 +42,12 @@ export interface Scenario {
    * different agent than the one that ships.
    */
   preamble?: string;
+  /**
+   * Tools the app's intent routing would hide for this prompt (see
+   * src/services/intent.ts deferredToolExclusions) — mirror it here or the
+   * eval measures a different agent than the one that ships.
+   */
+  exclude_tools?: string[];
   /** Scripted results keyed by tool name — overrides the mock default. */
   tool_results?: Record<string, unknown>;
   expect: ScenarioExpectation;

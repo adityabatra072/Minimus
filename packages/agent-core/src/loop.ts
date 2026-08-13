@@ -29,6 +29,13 @@ export interface AgentRunConfig {
   tools: ToolRegistry;
   /** Tool groups to expose ('core' is always included). */
   toolGroups?: string[];
+  /**
+   * Tools to hide from the model this run even when their group is exposed.
+   * A tool the model cannot see is a tool it cannot misuse — deterministic
+   * intent routing (e.g. "in 3 minutes" hides set_timer so the deferred work
+   * goes to schedule_task) beats prompt persuasion on small models.
+   */
+  excludeTools?: string[];
   policy?: ModelPolicy;
   /** App-supplied persona/context line(s) for the system prompt. */
   preamble?: string;
@@ -98,7 +105,10 @@ export class AgentLoop {
     const policy = config.policy ?? policyFor(config.adapter.modelId);
     const runId = config.runId ?? `run_${Date.now().toString(36)}`;
     const maxParseRetries = config.maxParseRetries ?? 2;
-    const exposedTools = config.tools.list(config.toolGroups);
+    const excluded = new Set(config.excludeTools ?? []);
+    const exposedTools = config.tools
+      .list(config.toolGroups)
+      .filter((t) => !excluded.has(t.name));
     const knownToolNames = exposedTools.map((t) => t.name);
 
     const systemPrompt = buildSystemPrompt(exposedTools, {

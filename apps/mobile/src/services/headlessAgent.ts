@@ -4,7 +4,12 @@ import { getToolRegistry } from '../tools';
 import { loadMacros } from '../tools/macroTools';
 import { useModelStore } from '../stores/modelStore';
 import { diag } from './diag';
-import { routeToolGroups } from './intent';
+import {
+  deferredPreamble,
+  deferredToolExclusions,
+  macroSteering,
+  routeToolGroups,
+} from './intent';
 
 /**
  * Runs an agent task with no screen attached.
@@ -20,6 +25,7 @@ import { routeToolGroups } from './intent';
 export async function runAgentHeadless(instruction: string): Promise<string> {
   const modelId = useModelStore.getState().activeModelId;
   const macros = await loadMacros().catch(() => []);
+  const macroHit = macroSteering(instruction, macros.map((m) => m.name));
   const preamble = [
     'You are Minimus, running entirely on this phone.',
     macros.length > 0
@@ -28,6 +34,10 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
           .join(', ')}.`
       : '',
     'This is a task you scheduled earlier and it is now due. Carry it out with your tools, then state the outcome in one short sentence.',
+    // A scheduled task can itself defer again ("check once more in 10 min") —
+    // keep the same steering the foreground screens get.
+    deferredPreamble(instruction) ?? '',
+    macroHit?.line ?? '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -38,6 +48,7 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
     toolGroups: routeToolGroups(instruction),
+    excludeTools: [...deferredToolExclusions(instruction), ...(macroHit?.exclude ?? [])],
     preamble,
     approvals: async () => false,
   })) {

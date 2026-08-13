@@ -40,6 +40,59 @@ export function routeToolGroups(prompt: string): string[] {
 
 const TEACHING_RE = /\b(new rule|when(ever)? i say|teach you|from now on,? when)\b/i;
 
+// Deliberately narrow: "in/after N minutes" is a deferred AGENT action, while
+// "tomorrow"/"tonight" phrasings are usually calendar territory — injecting a
+// schedule_task hint there would re-blur the schedule_task≠calendar_create
+// boundary the tool descriptions fight to keep sharp.
+const DEFERRED_RE = /\b(in|after) \d+ (seconds?|minutes?|hours?)\b/i;
+
+/**
+ * "Do X, then in N minutes do Y" — the deferred half must become a
+ * schedule_task, but small models reliably reach for set_timer (a timer
+ * "feels" like waiting). Rig evidence: watchdog-arm is flaky without this
+ * line even at full output budget. Same proven pattern as teachingPreamble.
+ */
+export function deferredPreamble(prompt: string): string | null {
+  if (!DEFERRED_RE.test(prompt)) return null;
+  return (
+    'Part of this request happens LATER. Do the immediate part now with tools, ' +
+    'then hand the later part to schedule_task (instruction = what to do, when = when) — ' +
+    'schedule_task runs YOU again at that time to do it. After handing it off, give your short final answer.'
+  );
+}
+
+/**
+ * Rig evidence (watchdog-arm, 6 repeats): even WITH the preamble above the
+ * model grabs set_timer ~1 run in 3 — "wait 3 minutes" feels like a timer.
+ * Prompt persuasion caps out; hiding the tool is deterministic. The narrow
+ * DEFERRED_RE keeps real timer requests ("set a timer for 10 minutes",
+ * phrased with "for") unaffected.
+ */
+export function deferredToolExclusions(prompt: string): string[] {
+  return DEFERRED_RE.test(prompt) ? ['set_timer', 'set_alarm'] : [];
+}
+
+/**
+ * The user said a phrase they taught ("Wind down.") — the only right move is
+ * run_macro, but with define_macro visible the model sometimes re-defines the
+ * macro from scratch instead (seen on the rig). Hide define_macro and say
+ * which macro matched. Never fires while the user is TEACHING (that path
+ * needs define_macro).
+ */
+export function macroSteering(
+  prompt: string,
+  macroNames: string[],
+): { exclude: string[]; line: string } | null {
+  if (TEACHING_RE.test(prompt)) return null;
+  const lower = prompt.toLowerCase();
+  const match = macroNames.find((n) => lower.includes(n.toLowerCase()));
+  if (!match) return null;
+  return {
+    exclude: ['define_macro'],
+    line: `The user just said the taught phrase "${match}". Call run_macro with name "${match}" — do not do anything else first.`,
+  };
+}
+
 /**
  * A sentence full of imperatives ("set…", "turn off…") makes a small model
  * act instead of record. When the user is clearly teaching a phrase, say so

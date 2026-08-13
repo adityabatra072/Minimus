@@ -69,12 +69,10 @@ export function buildSystemPrompt(tools: ToolDefinition[], opts: PromptOptions):
     'Never repeat a tool call you already made; its result is already above. Once you have what you need, STOP calling tools and answer.',
     'Never invent tool results. Never call tools that are not listed.',
   );
-  const hints = tools.filter((t) => t.usageHint);
-  if (hints.length > 0) {
-    lines.push('');
-    lines.push('## When to use which tool');
-    for (const t of hints) lines.push(`- ${t.usageHint}`);
-  }
+  // Usage hints render inline under each tool line only. They used to repeat
+  // in a trailing section, which cost ~200 prompt tokens — real money on
+  // devices where the llamacpp backend caps the window at 2048 and generation
+  // gets whatever the prompt leaves behind.
   return lines.join('\n');
 }
 
