@@ -163,6 +163,12 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       const toolsCalled: string[] = [];
       let finalText = '';
       let failure = '';
+      // Raw model output per turn — the ONLY way to see a tool call the
+      // parser rejected (the model then claims success in prose; the
+      // "said:" line alone can't show what it actually emitted).
+      let rawTurn = '';
+      const rawTurns: string[] = [];
+      const retryReasons: string[] = [];
       try {
         const events: AsyncGenerator<AgentEvent> = new AgentLoop().run(beat.utterance, {
           adapter: new LocalAdapter(activeModelId),
@@ -173,6 +179,15 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           approvals: async () => true,
         });
         for await (const ev of events) {
+          if (ev.type === 'text_delta') rawTurn += ev.text;
+          if (ev.type === 'turn_finished') {
+            if (rawTurn.trim()) rawTurns.push(rawTurn);
+            rawTurn = '';
+          }
+          if (ev.type === 'parse_retry') {
+            retryReasons.push(ev.reason);
+            diag(`REHEARSAL   · retry: ${ev.reason}`);
+          }
           if (ev.type === 'tool_call_started') {
             toolsCalled.push(ev.call.name);
             diag(`REHEARSAL   · ${verbFor(ev.call)}`);
@@ -210,6 +225,15 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       // in text instead of scheduling is invisible without this.
       if (!pass && finalText) {
         diag(`REHEARSAL   ↳ said: ${JSON.stringify(finalText.slice(0, 200))}`);
+      }
+      // And what it EMITTED raw — a rejected tool call only shows up here.
+      // Thinking is stripped: the call syntax is what matters, and syslog
+      // lines have finite patience.
+      if (!pass) {
+        for (const [i, raw] of rawTurns.entries()) {
+          const visible = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+          if (visible) diag(`REHEARSAL   ↳ raw[${i}]: ${JSON.stringify(visible.slice(0, 300))}`);
+        }
       }
       return pass;
     },
