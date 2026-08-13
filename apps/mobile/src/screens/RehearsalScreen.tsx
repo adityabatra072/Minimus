@@ -9,8 +9,10 @@ import { diag } from '../services/diag';
 import {
   deferredPreamble,
   deferredToolExclusions,
+  isTeaching,
   macroSteering,
   teachingPreamble,
+  teachingToolExclusions,
 } from '../services/intent';
 import { verbFor } from '../services/humanize';
 import { color, font, radius, space } from '../theme';
@@ -141,7 +143,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       const macroHit = macroSteering(beat.utterance, macros.map((m) => m.name));
       const preamble = [
         'You are Minimus, running entirely on this phone. You get things DONE using tools, then confirm briefly.',
-        macros.length > 0
+        macros.length > 0 && !isTeaching(beat.utterance)
           ? `Phrases the user has taught you (run these with run_macro): ${macros
               .map((m) => `"${m.name}"`)
               .join(', ')}. If the user says one of them, call run_macro with that name.`
@@ -154,6 +156,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
         .join('\n');
       const excludeTools = [
         ...deferredToolExclusions(beat.utterance),
+        ...teachingToolExclusions(beat.utterance),
         ...(macroHit?.exclude ?? []),
       ];
 
@@ -203,6 +206,11 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           ',',
         )}] ${pass ? '' : detail}`,
       );
+      // On FAIL, what the model SAID is the diagnosis — a beat that answers
+      // in text instead of scheduling is invisible without this.
+      if (!pass && finalText) {
+        diag(`REHEARSAL   ↳ said: ${JSON.stringify(finalText.slice(0, 200))}`);
+      }
       return pass;
     },
     [activeModelId],

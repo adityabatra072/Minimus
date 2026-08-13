@@ -107,3 +107,18 @@ export function teachingPreamble(prompt: string): string | null {
     'step in `steps`. Do NOT perform any of the actions now.'
   );
 }
+
+/**
+ * Rig evidence (teach-devstate, 0/3): re-teaching a phrase that is already in
+ * the taught-phrases list makes the model act AND define across 5-8 turns —
+ * the list line says "call run_macro for this phrase" while the teaching line
+ * says "only define_macro". While teaching: the list line must be dropped
+ * from the preamble (callers check isTeaching) and run_macro hidden.
+ */
+export function isTeaching(prompt: string): boolean {
+  return TEACHING_RE.test(prompt);
+}
+
+export function teachingToolExclusions(prompt: string): string[] {
+  return TEACHING_RE.test(prompt) ? ['run_macro'] : [];
+}

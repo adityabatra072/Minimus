@@ -7,8 +7,10 @@ import { diag } from './diag';
 import {
   deferredPreamble,
   deferredToolExclusions,
+  isTeaching,
   macroSteering,
   routeToolGroups,
+  teachingToolExclusions,
 } from './intent';
 
 /**
@@ -28,7 +30,7 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
   const macroHit = macroSteering(instruction, macros.map((m) => m.name));
   const preamble = [
     'You are Minimus, running entirely on this phone.',
-    macros.length > 0
+    macros.length > 0 && !isTeaching(instruction)
       ? `Phrases the user has taught you (run these with run_macro): ${macros
           .map((m) => `"${m.name}"`)
           .join(', ')}.`
@@ -48,7 +50,11 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
     toolGroups: routeToolGroups(instruction),
-    excludeTools: [...deferredToolExclusions(instruction), ...(macroHit?.exclude ?? [])],
+    excludeTools: [
+      ...deferredToolExclusions(instruction),
+      ...teachingToolExclusions(instruction),
+      ...(macroHit?.exclude ?? []),
+    ],
     preamble,
     approvals: async () => false,
   })) {

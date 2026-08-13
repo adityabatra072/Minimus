@@ -149,6 +149,7 @@ export class AgentLoop {
     let streakTool = '';
     let streakCount = 0;
     let streakNudged = false;
+    let emptyAnswerNudged = false;
 
     for (let turn = startTurn; turn < policy.maxTurns; turn++) {
       if (config.signal?.aborted) {
@@ -225,6 +226,24 @@ export class AgentLoop {
 
       // Terminal condition: plain text, no tool call.
       if (parsed.calls.length === 0) {
+        // A run must never end with a blank bubble: a turn that spent itself
+        // thinking (or emitted nothing) gets ONE explicit demand to answer.
+        if (parsed.text.trim() === '' && !emptyAnswerNudged) {
+          emptyAnswerNudged = true;
+          messages.push({
+            role: 'assistant',
+            content: '',
+            ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
+          });
+          messages.push({
+            role: 'user',
+            content:
+              'You did not say anything. Answer the user now in one or two plain sentences using what you already know from the tool results above. Do not call any tools.',
+          });
+          yield { type: 'parse_retry', attempt: 1, reason: 'empty final answer' };
+          yield { type: 'turn_finished', turn };
+          continue;
+        }
         const assistant: AssistantMessage = {
           role: 'assistant',
           content: parsed.text,

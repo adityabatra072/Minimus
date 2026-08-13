@@ -72,6 +72,36 @@ describe('AgentLoop', () => {
     expect(events.filter((e) => e.type === 'turn_started')).toHaveLength(1);
   });
 
+  it('demands an answer once when the final turn is empty', async () => {
+    const { tools } = makeTools();
+    // Turn 1: searches. Turn 2: emits nothing (instant EOS — seen on-device
+    // after web_search). The loop must not end with a blank bubble — one
+    // nudge, then the answer.
+    const adapter = new MockAdapter([
+      '[web_search(query="capital of france")]',
+      '',
+      'Paris.',
+    ]);
+    const events = await collect(new AgentLoop().run('capital of france?', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(finished(events).finalText).toBe('Paris.');
+    const nudges = events.filter(
+      (e) => e.type === 'parse_retry' && e.reason === 'empty final answer',
+    );
+    expect(nudges).toHaveLength(1);
+    // The nudge must be visible to the model as a user message.
+    const lastRequest = adapter.requests.at(-1)!;
+    expect(lastRequest.at(-1)?.content).toContain('Answer the user now');
+  });
+
+  it('gives up nudging for an answer after one attempt', async () => {
+    const { tools } = makeTools();
+    const adapter = new MockAdapter(['', '']);
+    const events = await collect(new AgentLoop().run('say something', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(finished(events).finalText).toBe('');
+  });
+
   it('retries with a nudge on unknown tool, then succeeds', async () => {
     const { tools, log } = makeTools();
     const adapter = new MockAdapter([

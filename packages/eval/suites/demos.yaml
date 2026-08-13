@@ -58,8 +58,10 @@ scenarios:
   - id: teach-macro
     prompt: "New rule: when I say wind down, set the brightness to 20 percent, turn the flashlight off, and remind me to set my alarm."
     tools: [core, device, schedule]
-    # mirrors src/services/intent.ts teachingPreamble(): the app detects
-    # teaching intent ("new rule", "when I say") and appends this line
+    # mirrors src/services/intent.ts: teachingPreamble() appends the teaching
+    # line, teachingToolExclusions() hides run_macro, and while teaching the
+    # taught-phrases list is dropped (with it present: teach-devstate 0/3)
+    exclude_tools: [run_macro]
     preamble: >-
       You are Minimus, running entirely on this phone. You get things
       DONE using tools, then confirm briefly.
@@ -71,7 +73,9 @@ scenarios:
       calls:
         - tool: define_macro
           args: { name: { re: "wind ?down" }, steps: { min_items: 2 } }
-      max_turns: 5
+      # 7, not 5: the empty-answer nudge legitimately spends a turn when the
+      # model's confirmation comes back blank
+      max_turns: 7
 
   - id: run-macro
     prompt: Wind down.

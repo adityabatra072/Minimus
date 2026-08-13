@@ -3,6 +3,7 @@ import {
   Animated,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -22,9 +23,11 @@ import { loadMacros } from '../tools/macroTools';
 import {
   deferredPreamble,
   deferredToolExclusions,
+  isTeaching,
   macroSteering,
   routeToolGroups,
   teachingPreamble,
+  teachingToolExclusions,
 } from '../services/intent';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
@@ -44,6 +47,7 @@ type Item =
   | { kind: 'user'; id: string; text: string }
   | { kind: 'scheduled'; id: string; text: string }
   | { kind: 'agent'; id: string; text: string }
+  | { kind: 'sources'; id: string; sources: Source[] }
   | { kind: 'rail'; id: string; ops: Operation[] }
   | {
       kind: 'approval';
@@ -53,6 +57,28 @@ type Item =
       resolve: (ok: boolean) => void;
       resolved?: 'yes' | 'no';
     };
+
+interface Source {
+  title: string;
+  url: string;
+}
+
+/** Pull {results:[{title,url}]} out of a web_search tool result string. */
+function sourcesFrom(resultJson: string): Source[] {
+  try {
+    const parsed = JSON.parse(resultJson) as { results?: { title?: string; url?: string }[] };
+    return (parsed.results ?? [])
+      .filter((r): r is { title: string; url: string } => Boolean(r.title && r.url))
+      .map((r) => ({ title: r.title, url: r.url }));
+  } catch {
+    return [];
+  }
+}
+
+function domainOf(url: string): string {
+  const m = /^https?:\/\/(?:www\.)?([^/]+)/i.exec(url);
+  return m?.[1] ?? url;
+}
 
 // Seeded with time so Fast Refresh (which resets module state) can never
 // mint ids that collide with items already in React state.
@@ -132,7 +158,11 @@ export default function ChatScreen({
       const preambleLines = [
         'You are Minimus, running entirely on this phone. You get things DONE using tools, then confirm briefly.',
       ];
-      if (macros.length > 0) {
+      // While TEACHING, the taught-phrases line is poison: it says "call
+      // run_macro for this phrase" while the teaching line says "only
+      // define_macro" — the model acts AND defines across 5-8 turns (rig:
+      // teach-devstate 0/3 with the line, clean without).
+      if (macros.length > 0 && !isTeaching(prompt)) {
         preambleLines.push(
           `Phrases the user has taught you (run these with run_macro): ${macros
             .map((m) => `"${m.name}"`)
@@ -150,7 +180,11 @@ export default function ChatScreen({
       if (deferred) preambleLines.push(deferred);
       const macroHit = macroSteering(prompt, macros.map((m) => m.name));
       if (macroHit) preambleLines.push(macroHit.line);
-      const excludeTools = [...deferredToolExclusions(prompt), ...(macroHit?.exclude ?? [])];
+      const excludeTools = [
+        ...deferredToolExclusions(prompt),
+        ...teachingToolExclusions(prompt),
+        ...(macroHit?.exclude ?? []),
+      ];
       const toolGroups = routeToolGroups(prompt);
       diag(`tool groups: ${toolGroups.join(',')}`);
 
@@ -158,6 +192,7 @@ export default function ChatScreen({
       let saidAnything = false;
       let lastOpSummary = '';
       let finalText = '';
+      const runSources: Source[] = [];
 
       const upsertRail = (mutate: (ops: Operation[]) => Operation[]) => {
         setItems((prev) => {
@@ -260,6 +295,11 @@ export default function ChatScreen({
             const summary = resultFor(ev.call, ev.result, ev.isError);
             diag(`tool ${ev.call.name} -> ${ev.isError ? 'ERROR ' : ''}${summary}`);
             if (!ev.isError) lastOpSummary = summary;
+            if (!ev.isError && ev.call.name === 'web_search') {
+              for (const s of sourcesFrom(ev.result)) {
+                if (!runSources.some((x) => x.url === s.url)) runSources.push(s);
+              }
+            }
             upsertRail((ops) => {
               const existing = ops.find((o) => o.id === ev.call.id);
               const done: Operation = {
@@ -294,6 +334,13 @@ export default function ChatScreen({
               setItems((prev) => [
                 ...prev,
                 { kind: 'agent', id: nextId(), text: `Done — ${lastOpSummary.toLowerCase()}.` },
+              ]);
+            }
+            if (ev.reason === 'completed' && runSources.length > 0) {
+              // The answer came from the web — show where. Tappable, honest.
+              setItems((prev) => [
+                ...prev,
+                { kind: 'sources', id: nextId(), sources: runSources.slice(0, 5) },
               ]);
             }
             if (ev.reason === 'max_turns') {
@@ -471,6 +518,26 @@ function ItemView({ item }: { item: Item }): React.JSX.Element | null {
           </View>
         </FadeIn>
       );
+    case 'sources':
+      return (
+        <FadeIn>
+          <View style={styles.sourcesBlock}>
+            <Text style={styles.sourcesLabel}>sources</Text>
+            {item.sources.map((s) => (
+              <TouchableOpacity
+                key={s.url}
+                style={styles.sourceRow}
+                onPress={() => void Linking.openURL(s.url).catch(() => {})}
+              >
+                <Text style={styles.sourceTitle} numberOfLines={1}>
+                  {s.title}
+                </Text>
+                <Text style={styles.sourceDomain}>{domainOf(s.url)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </FadeIn>
+      );
     case 'rail':
       return <ActionRail ops={item.ops} />;
     case 'approval':
@@ -573,6 +640,24 @@ const styles = StyleSheet.create({
   scheduledText: { color: color.text, fontSize: 14, lineHeight: 20 },
 
   agentBlock: { marginTop: space(1) },
+
+  sourcesBlock: {
+    marginTop: space(1),
+    borderLeftWidth: 2,
+    borderLeftColor: color.line,
+    paddingLeft: space(3),
+    gap: space(1.5),
+  },
+  sourcesLabel: {
+    color: color.faint,
+    fontSize: 10,
+    fontFamily: font.mono,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  sourceRow: { flexDirection: 'row', alignItems: 'baseline', gap: space(2) },
+  sourceTitle: { color: color.cyan, fontSize: 12, flexShrink: 1 },
+  sourceDomain: { color: color.faint, fontSize: 10, fontFamily: font.mono },
 
   working: {
     flexDirection: 'row',
