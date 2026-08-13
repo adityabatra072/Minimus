@@ -4,6 +4,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -37,7 +38,7 @@ import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
 import { Composer } from '../components/Composer';
 import { LiveDot } from '../components/LiveDot';
-import { color, font, space } from '../theme';
+import { color, font, radius, space } from '../theme';
 
 /**
  * E.V conversation surface. The stream of raw model tokens NEVER renders —
@@ -492,12 +493,9 @@ function Header({
   onOpenHistory?: () => void;
   onNewChat?: () => void;
 }): React.JSX.Element {
-  const activeModelId = useModelStore((s) => s.activeModelId);
   const remote = useSettingsStore((s) => s.remote);
   const usingRemote = remote.enabled && remote.baseUrl.trim() !== '' && remote.model.trim() !== '';
-  const modelLabel = usingRemote
-    ? `${remote.model} · cloud`
-    : `${activeModelId.replace(/-(ud-)?q\d.*$/i, '').replace(/-/g, ' ')} · on-device`;
+  const [menuOpen, setMenuOpen] = useState(false);
   const [bubbleOn, setBubbleOn] = useState(false);
   const toggleBubble = useCallback(async () => {
     try {
@@ -513,46 +511,55 @@ function Header({
     }
   }, [bubbleOn]);
 
+  // One status chip, one action, one menu. Everything else lives behind ⋯ —
+  // a phone header is not a toolbar.
+  const menuItems: { label: string; action?: () => void; on?: boolean }[] = [
+    ...(onOpenHistory ? [{ label: 'Chats', action: onOpenHistory }] : []),
+    ...(onOpenModels ? [{ label: 'Models', action: onOpenModels }] : []),
+    ...(onOpenSettings ? [{ label: 'Settings', action: onOpenSettings }] : []),
+    ...(onOpenRehearsal ? [{ label: 'Rehearsal', action: onOpenRehearsal }] : []),
+    ...(overlay.available()
+      ? [{ label: bubbleOn ? 'Floating bubble · on' : 'Floating bubble · off', action: () => void toggleBubble(), on: bubbleOn }]
+      : []),
+  ];
+
   return (
     <View style={styles.header}>
       <Text style={styles.wordmark}>
         minimus<Text style={styles.wordmarkDot}> ●</Text>
       </Text>
       <View style={styles.headerRight}>
+        <View style={styles.statusPill}>
+          <View style={[styles.statusDot, usingRemote && styles.statusDotCloud]} />
+          <Text style={styles.statusText}>{usingRemote ? 'cloud' : 'on-device'}</Text>
+        </View>
         {onNewChat ? (
           <TouchableOpacity style={styles.bubbleBtn} onPress={onNewChat} hitSlop={8}>
             <Text style={styles.headerGlyph}>＋</Text>
           </TouchableOpacity>
         ) : null}
-        {onOpenHistory ? (
-          <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenHistory} hitSlop={8}>
-            <Text style={styles.headerGlyph}>≡</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onOpenSettings ? (
-          <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenSettings} hitSlop={8}>
-            <Text style={styles.headerGlyph}>⚙</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onOpenRehearsal ? (
-          <TouchableOpacity style={styles.bubbleBtn} onPress={onOpenRehearsal} hitSlop={8}>
-            <Text style={styles.rehearseGlyph}>✓</Text>
-          </TouchableOpacity>
-        ) : null}
-        {overlay.available() ? (
-          <TouchableOpacity
-            style={[styles.bubbleBtn, bubbleOn && styles.bubbleBtnOn]}
-            onPress={() => void toggleBubble()}
-            hitSlop={8}
-          >
-            <View style={[styles.bubbleGlyph, bubbleOn && styles.bubbleGlyphOn]} />
-          </TouchableOpacity>
-        ) : null}
-        <TouchableOpacity style={styles.statusPill} onPress={onOpenModels}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusText}>{modelLabel}</Text>
+        <TouchableOpacity style={styles.bubbleBtn} onPress={() => setMenuOpen(true)} hitSlop={8}>
+          <Text style={styles.headerGlyph}>⋯</Text>
         </TouchableOpacity>
       </View>
+      <Modal transparent visible={menuOpen} animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menuSheet}>
+            {menuItems.map((item) => (
+              <TouchableOpacity
+                key={item.label}
+                style={styles.menuRow}
+                onPress={() => {
+                  setMenuOpen(false);
+                  item.action?.();
+                }}
+              >
+                <Text style={[styles.menuLabel, item.on && styles.menuLabelOn]}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -692,7 +699,28 @@ const styles = StyleSheet.create({
     paddingVertical: space(1.25),
   },
   statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: color.ok },
+  statusDotCloud: { backgroundColor: color.amber },
   statusText: { color: color.dim, fontSize: 11, fontFamily: font.mono },
+
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: space(14),
+    paddingRight: space(4),
+  },
+  menuSheet: {
+    minWidth: 200,
+    backgroundColor: color.bg1,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: color.line,
+    paddingVertical: space(1),
+  },
+  menuRow: { paddingHorizontal: space(4), paddingVertical: space(3) },
+  menuLabel: { color: color.text, fontSize: 15 },
+  menuLabelOn: { color: color.amber },
 
   list: { flex: 1 },
   listContent: { paddingHorizontal: space(4), paddingBottom: space(4), gap: space(3) },

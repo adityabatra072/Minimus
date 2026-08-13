@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { AgentLoop, type AgentEvent } from '@minimus/agent-core';
 import { LocalAdapter } from '../services/LocalAdapter';
 import { getToolRegistry } from '../tools';
@@ -115,6 +115,12 @@ interface BeatResult {
   detail?: string;
   seconds?: number;
   tools?: string[];
+  /** Final answer text on FAIL — what the model claimed. */
+  said?: string;
+  /** Raw per-turn model output on FAIL (thinking stripped). */
+  raw?: string[];
+  /** Parse-retry reasons observed during the run. */
+  retries?: string[];
 }
 
 const registry = getToolRegistry();
@@ -212,9 +218,19 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       const detail = pass
         ? finalText.slice(0, 100) || 'done'
         : failure || `expected ${beat.expectTool}, got ${toolsCalled.join(', ') || 'no tools'}`;
+      const rawVisible = rawTurns
+        .map((raw) => raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim())
+        .filter(Boolean);
       setResults((r) => ({
         ...r,
-        [beat.id]: { status: pass ? 'pass' : 'fail', detail, seconds, tools: toolsCalled },
+        [beat.id]: {
+          status: pass ? 'pass' : 'fail',
+          detail,
+          seconds,
+          tools: toolsCalled,
+          ...(pass ? {} : { said: finalText, raw: rawVisible }),
+          ...(retryReasons.length > 0 ? { retries: retryReasons } : {}),
+        },
       }));
       diag(
         `REHEARSAL ${pass ? '✅ PASS' : '❌ FAIL'} ${beat.id} in ${seconds}s tools=[${toolsCalled.join(
@@ -262,6 +278,36 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
   const passCount = Object.values(results).filter((r) => r.status === 'pass').length;
   const failCount = Object.values(results).filter((r) => r.status === 'fail').length;
 
+  // Full-fidelity report through the share sheet — the phone can be
+  // unplugged during a run (watchdog needs it) and syslog forensics die with
+  // the cable; this is the offline path for the same evidence.
+  const shareReport = useCallback(async () => {
+    const lines: string[] = [
+      `Minimus rehearsal report`,
+      `model: ${activeModelId}`,
+      `time: ${new Date().toISOString()}`,
+      `tally: ${passCount} passed · ${failCount} failed`,
+      '',
+    ];
+    for (const beat of BEATS) {
+      const r = results[beat.id];
+      if (!r || r.status === 'idle' || r.status === 'running') continue;
+      lines.push(`${r.status === 'pass' ? '✅' : '❌'} ${beat.id} (${r.seconds ?? '?'}s)`);
+      lines.push(`   utterance: "${beat.utterance}"`);
+      lines.push(`   tools: [${(r.tools ?? []).join(', ')}]`);
+      if (r.detail) lines.push(`   detail: ${r.detail}`);
+      if (r.retries?.length) lines.push(`   retries: ${r.retries.join(' | ')}`);
+      if (r.status === 'fail') {
+        if (r.said) lines.push(`   said: ${JSON.stringify(r.said.slice(0, 400))}`);
+        for (const [i, raw] of (r.raw ?? []).entries()) {
+          lines.push(`   raw[${i}]: ${JSON.stringify(raw.slice(0, 500))}`);
+        }
+      }
+      lines.push('');
+    }
+    await Share.share({ message: lines.join('\n') }).catch(() => undefined);
+  }, [results, activeModelId, passCount, failCount]);
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
@@ -295,9 +341,14 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       </View>
 
       {passCount + failCount > 0 ? (
-        <Text style={styles.tally}>
-          {passCount} passed · {failCount} failed
-        </Text>
+        <View style={styles.tallyRow}>
+          <Text style={styles.tally}>
+            {passCount} passed · {failCount} failed
+          </Text>
+          <TouchableOpacity onPress={() => void shareReport()} hitSlop={10} disabled={busy}>
+            <Text style={[styles.shareBtn, busy && styles.closeDisabled]}>share report</Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
 
       <FlatList
@@ -387,13 +438,19 @@ const styles = StyleSheet.create({
   toggleOn: { borderColor: color.amberDeep },
   toggleText: { color: color.faint, fontSize: 11, fontFamily: font.mono },
   toggleTextOn: { color: color.amber },
+  tallyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: space(4),
+    paddingTop: space(3),
+  },
   tally: {
     color: color.dim,
     fontFamily: font.mono,
     fontSize: 12,
-    paddingHorizontal: space(4),
-    paddingTop: space(3),
   },
+  shareBtn: { color: color.cyan, fontFamily: font.mono, fontSize: 12 },
   list: { padding: space(4), gap: space(2) },
   row: {
     backgroundColor: color.bg1,
