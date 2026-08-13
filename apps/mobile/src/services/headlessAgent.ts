@@ -4,6 +4,7 @@ import { getToolRegistry } from '../tools';
 import { loadMacros } from '../tools/macroTools';
 import { useModelStore } from '../stores/modelStore';
 import { diag } from './diag';
+import { routeToolGroups } from './intent';
 
 /**
  * Runs an agent task with no screen attached.
@@ -36,6 +37,7 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
   for await (const ev of new AgentLoop().run(instruction, {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
+    toolGroups: routeToolGroups(instruction),
     preamble,
     approvals: async () => false,
   })) {

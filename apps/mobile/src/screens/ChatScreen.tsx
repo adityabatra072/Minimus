@@ -19,6 +19,7 @@ import { scheduler } from '../services/scheduler';
 import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
+import { routeToolGroups, teachingPreamble } from '../services/intent';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -137,6 +138,10 @@ export default function ChatScreen({
           'This is a task you scheduled earlier and it is now due. Carry it out with your tools, then state the outcome in one short sentence.',
         );
       }
+      const teaching = teachingPreamble(prompt);
+      if (teaching) preambleLines.push(teaching);
+      const toolGroups = routeToolGroups(prompt);
+      diag(`tool groups: ${toolGroups.join(',')}`);
 
       let railId: string | null = null;
       let saidAnything = false;
@@ -186,6 +191,7 @@ export default function ChatScreen({
         const events = loop.run(prompt.trim(), {
           adapter,
           tools: registry,
+          toolGroups,
           preamble: preambleLines.join('\n'),
           approvals: (req) => askApproval(req.call),
           signal: abort.signal,

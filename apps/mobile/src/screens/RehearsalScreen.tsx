@@ -6,6 +6,7 @@ import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { loadMacros } from '../tools/macroTools';
 import { diag } from '../services/diag';
+import { teachingPreamble } from '../services/intent';
 import { verbFor } from '../services/humanize';
 import { color, font, radius, space } from '../theme';
 import { LiveDot } from '../components/LiveDot';
@@ -26,6 +27,8 @@ interface Beat {
   utterance: string;
   /** Tool that must be called for the beat to count as working. */
   expectTool: string;
+  /** Tool groups exposed for this beat — mirrors packages/eval/suites/demos.yaml. */
+  toolGroups: string[];
   /** Beats that yank focus to another app — opt in explicitly. */
   stealsFocus?: boolean;
   note?: string;
@@ -34,6 +37,7 @@ interface Beat {
 const BEATS: Beat[] = [
   {
     id: 'private-remember',
+    toolGroups: ['core', 'schedule'],
     title: '1. Private context — store',
     utterance:
       "Remember that I'm on 20mg of Lexapro, my therapist is Dr. Okafor, and my appointment is Thursday at 4pm.",
@@ -41,6 +45,7 @@ const BEATS: Beat[] = [
   },
   {
     id: 'watchdog-arm',
+    toolGroups: ['core', 'device', 'schedule'],
     title: '2. Watchdog — arm it',
     utterance:
       'Check my battery now and remember it. Then in 3 minutes check it again and tell me if it dropped more than 2 percent.',
@@ -49,6 +54,7 @@ const BEATS: Beat[] = [
   },
   {
     id: 'teach-macro',
+    toolGroups: ['core', 'device', 'schedule'],
     title: '3. Teach a verb',
     utterance:
       'New rule: when I say wind down, set the brightness to 20 percent, turn the flashlight off, and remind me to set my alarm.',
@@ -56,12 +62,14 @@ const BEATS: Beat[] = [
   },
   {
     id: 'run-macro',
+    toolGroups: ['core', 'device', 'schedule'],
     title: '3b. Say the verb',
     utterance: 'Wind down.',
     expectTool: 'run_macro',
   },
   {
     id: 'calendar-judgment',
+    toolGroups: ['schedule'],
     title: '4. Calendar judgment',
     utterance:
       "Look at tomorrow — find me 90 minutes for the gym that isn't before 10am and isn't straight after standup, and put it in.",
@@ -70,18 +78,21 @@ const BEATS: Beat[] = [
   },
   {
     id: 'private-recall',
+    toolGroups: ['core'],
     title: '1b. Private context — recall',
     utterance: 'What do I need to remember about Thursday?',
     expectTool: 'recall',
   },
   {
     id: 'flashlight',
+    toolGroups: ['device'],
     title: 'Bench: flashlight',
     utterance: 'turn on the flashlight',
     expectTool: 'flashlight',
   },
   {
     id: 'spotify',
+    toolGroups: ['music'],
     title: 'Bench: Spotify (opens Spotify)',
     utterance: 'Play Janice STFU on Spotify',
     expectTool: 'play_music',
@@ -133,6 +144,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
         const events: AsyncGenerator<AgentEvent> = new AgentLoop().run(beat.utterance, {
           adapter: new LocalAdapter(activeModelId),
           tools: registry,
+          toolGroups: beat.toolGroups,
           preamble,
           approvals: async () => true,
         });
