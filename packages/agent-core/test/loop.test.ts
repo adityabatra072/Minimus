@@ -91,7 +91,48 @@ describe('AgentLoop', () => {
     expect(nudges).toHaveLength(1);
     // The nudge must be visible to the model as a user message.
     const lastRequest = adapter.requests.at(-1)!;
-    expect(lastRequest.at(-1)?.content).toContain('Answer the user now');
+    expect(lastRequest.at(-1)?.content).toContain('Continue NOW');
+  });
+
+  it('retries a tool call that was cut off mid-generation', async () => {
+    const { tools, log } = makeTools();
+    // Device evidence: output window exhausted mid-call → raw ends in an
+    // unclosed call opener. Must retry, not complete with the fragment.
+    const adapter = new MockAdapter([
+      "[flashlight(on=",
+      "[flashlight(on=True)]",
+      'Flashlight is on.',
+    ]);
+    const events = await collect(new AgentLoop().run('flashlight on', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(finished(events).finalText).toBe('Flashlight is on.');
+    expect(log).toEqual(['flashlight:true']);
+    const retries = events.filter(
+      (e) => e.type === 'parse_retry' && e.reason === 'truncated tool call',
+    );
+    expect(retries).toHaveLength(1);
+  });
+
+  it('errors out if the tool call keeps getting truncated', async () => {
+    const { tools } = makeTools();
+    const adapter = new MockAdapter(['[flashlight(on=', '[flashlight(on=', '[flashlight(on=']);
+    const events = await collect(new AgentLoop().run('flashlight on', { adapter, tools }));
+    expect(finished(events).reason).toBe('error');
+  });
+
+  it('lets the empty-turn nudge continue with a TOOL, not just text', async () => {
+    const { tools, log } = makeTools();
+    // Mid-task instant-EOS (seen on iPhone after tool results): the nudge
+    // must not forbid tools — the model may still have work to do.
+    const adapter = new MockAdapter([
+      '[web_search(query="battery tips")]',
+      '',
+      '[flashlight(on=True)]',
+      'Done.',
+    ]);
+    const events = await collect(new AgentLoop().run('search then flashlight', { adapter, tools }));
+    expect(finished(events).reason).toBe('completed');
+    expect(log).toContain('flashlight:true');
   });
 
   it('gives up nudging for an answer after one attempt', async () => {

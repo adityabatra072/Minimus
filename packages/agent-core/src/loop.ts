@@ -191,6 +191,38 @@ export class AgentLoop {
       const parsed = parseAssistantOutput(raw, policy.format, knownToolNames);
       if (parsed.reasoning) yield { type: 'reasoning_delta', text: parsed.reasoning };
 
+      // Truncated tool call: the model ran out of generation window MID-CALL
+      // (device evidence: raw output ended in `[define_macro(name='`).
+      // Without this check the fragment reads as a plain-text final answer
+      // and the run "completes". The retry gets a fresh window, and the bare
+      // call fits easily once the nudge suppresses long thinking.
+      const truncatedCall =
+        parsed.calls.length === 0 &&
+        (policy.format === 'pythonic'
+          ? /\[\s*[a-zA-Z_]\w*\s*\([^\]]*$/.test(parsed.text)
+          : /<tool_call>(?![\s\S]*<\/tool_call>)/.test(parsed.text));
+      if (truncatedCall) {
+        parseRetriesThisTurn++;
+        if (parseRetriesThisTurn > maxParseRetries) {
+          yield {
+            type: 'run_finished',
+            reason: 'error',
+            finalText,
+            error: 'tool call kept getting cut off mid-generation',
+          };
+          return;
+        }
+        messages.push({ role: 'assistant', content: parsed.text, ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}) });
+        messages.push({
+          role: 'user',
+          content:
+            'Your tool call was CUT OFF before it finished. Reply again with ONLY the complete tool call and nothing else. Do not think first.',
+        });
+        yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: 'truncated tool call' };
+        yield { type: 'turn_finished', turn };
+        continue;
+      }
+
       // Thinking overrun: the model burned its whole budget inside <think>
       // and emitted no visible answer. Nudge it to conclude instead of
       // treating the empty string as a completed run.
@@ -235,10 +267,14 @@ export class AgentLoop {
             content: '',
             ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
           });
+          // Neutral wording matters: on-device this fires mid-task (the
+          // model emits instant-EOS turns after tool results), and a nudge
+          // that forbids tools kills the rest of the job — watchdog died
+          // exactly that way on the iPhone.
           messages.push({
             role: 'user',
             content:
-              'You did not say anything. Answer the user now in one or two plain sentences using what you already know from the tool results above. Do not call any tools.',
+              'You stopped without replying. Continue NOW: call the next tool the task needs, or if everything is done give the user your short answer in one or two plain sentences.',
           });
           yield { type: 'parse_retry', attempt: 1, reason: 'empty final answer' };
           yield { type: 'turn_finished', turn };
