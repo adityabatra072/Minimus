@@ -265,7 +265,7 @@ export default function ChatScreen({
       // user opted them in explicitly, and each call is approval-gated.
       // The vision group exists only while an image is attached.
       const toolGroups = [
-        ...routeToolGroups(prompt),
+        ...routeToolGroups(prompt, macros.map((m) => m.name)),
         ...userToolGroups(),
         ...(attachment ? ['vision'] : []),
       ];

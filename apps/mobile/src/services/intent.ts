@@ -9,8 +9,11 @@
  * only the relevant tool groups halves the prompt and restores the budget —
  * the same conditions the eval rig validates under.
  *
- * Routing is keyword-based and additive: 'core' tools (memory, macros) ride
- * along always; unmatched prompts get the broad default set.
+ * Routing is keyword-based and additive; unmatched prompts get the broad
+ * default set. 'core' (memory + macros) is routed like everything else —
+ * it used to ride along unconditionally, and those four extra schemas were
+ * the difference between calendar-judgment passing 4/4 (rehearsal,
+ * schedule-only) and stalling 0/3 in chat on the same phone.
  */
 
 const GROUP_TRIGGERS: [RegExp, string][] = [
@@ -25,16 +28,26 @@ const GROUP_TRIGGERS: [RegExp, string][] = [
     /\b(flashlight|torch|brightness|battery|storage|open|launch|clipboard|copy|screen|dim)\b/i,
     'device',
   ],
+  [
+    /\b(remember|recall|forget|memory|what did i|what do i need|i told you|note that|save this)\b/i,
+    'core',
+  ],
 ];
 
 const DEFAULT_GROUPS = ['device', 'schedule', 'music'];
 
-export function routeToolGroups(prompt: string): string[] {
-  const groups = new Set<string>(['core']);
+export function routeToolGroups(prompt: string, macroNames: string[] = []): string[] {
+  const groups = new Set<string>();
   for (const [re, group] of GROUP_TRIGGERS) {
     if (re.test(prompt)) groups.add(group);
   }
-  if (groups.size === 1) for (const g of DEFAULT_GROUPS) groups.add(g);
+  // Teaching a phrase or saying a taught one needs the macro tools (group
+  // 'core'), whatever the rest of the sentence looks like.
+  const lower = prompt.toLowerCase();
+  if (TEACHING_RE.test(prompt) || macroNames.some((n) => lower.includes(n.toLowerCase()))) {
+    groups.add('core');
+  }
+  if (groups.size === 0) for (const g of DEFAULT_GROUPS) groups.add(g);
   return [...groups];
 }
 

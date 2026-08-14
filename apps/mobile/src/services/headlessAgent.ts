@@ -50,7 +50,7 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
   for await (const ev of new AgentLoop().run(instruction, {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
-    toolGroups: [...routeToolGroups(instruction), ...userToolGroups()],
+    toolGroups: [...routeToolGroups(instruction, macros.map((m) => m.name)), ...userToolGroups()],
     excludeTools: [
       ...deferredToolExclusions(instruction),
       ...teachingToolExclusions(instruction),
