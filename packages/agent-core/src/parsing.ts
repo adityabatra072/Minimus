@@ -212,12 +212,21 @@ function tryParsePythonicCall(src: string): ParsedCall | null {
 
 /** Parse `[func(...), func2(...)]` or `func(...)` — the LFM list form. */
 function parsePythonicList(src: string): ParsedCall[] {
+  // Accepts a single list `[a(), b()]` AND concatenated lists `[a()][b()]` —
+  // a model batching several actions emits the latter, and treating it as
+  // prose leaks raw tool syntax into the chat as a "final answer".
   const inner = src.trim().replace(/^\[/, '').replace(/\]$/, '');
   const calls: ParsedCall[] = [];
-  // Split on top-level `),` boundaries.
   let depth = 0;
   let inString: string | null = null;
   let start = 0;
+  const flush = (end: number) => {
+    const piece = inner.slice(start, end);
+    if (piece.trim()) {
+      const parsed = tryParsePythonicCall(piece);
+      if (parsed) calls.push(parsed);
+    }
+  };
   for (let i = 0; i < inner.length; i++) {
     const c = inner[i]!;
     if (inString) {
@@ -226,20 +235,28 @@ function parsePythonicList(src: string): ParsedCall[] {
       continue;
     }
     if (c === '"' || c === "'") inString = c;
-    else if (c === '(' || c === '[' || c === '{') depth++;
-    else if (c === ')' || c === ']' || c === '}') depth--;
-    else if (c === ',' && depth === 0) {
-      const piece = inner.slice(start, i);
-      const parsed = tryParsePythonicCall(piece);
-      if (parsed) calls.push(parsed);
+    else if (c === '(' || c === '{') depth++;
+    else if (c === ')' || c === '}') depth--;
+    else if (c === '[') {
+      // Inside arguments it's a list literal; at top level it opens the NEXT
+      // concatenated call list — either way the piece so far is complete.
+      if (depth > 0) depth++;
+      else {
+        flush(i);
+        start = i + 1;
+      }
+    } else if (c === ']') {
+      if (depth > 0) depth--;
+      else {
+        flush(i);
+        start = i + 1;
+      }
+    } else if (c === ',' && depth === 0) {
+      flush(i);
       start = i + 1;
     }
   }
-  const last = inner.slice(start);
-  if (last.trim()) {
-    const parsed = tryParsePythonicCall(last);
-    if (parsed) calls.push(parsed);
-  }
+  flush(inner.length);
   return calls;
 }
 

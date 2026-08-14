@@ -84,6 +84,31 @@ describe('pythonic (LFM) format', () => {
     expect(out.text).toBe('');
   });
 
+  it('parses CONCATENATED call lists `[a()][b()]` (batching-under-pressure quirk)', () => {
+    // Seen on-device: asked to create several calendar events at once, the
+    // model emitted back-to-back bracketed calls; the old parser returned
+    // zero calls and the raw syntax rendered as the final answer.
+    const out = parseAssistantOutput(
+      "[set_alarm(minutes=10)][get_weather(location='Pune')][set_alarm(minutes=20)]",
+      'pythonic',
+      TOOLS,
+    );
+    expect(out.calls).toHaveLength(3);
+    expect(out.calls.map((c) => c.name)).toEqual(['set_alarm', 'get_weather', 'set_alarm']);
+    expect(out.calls[1]!.arguments).toEqual({ location: 'Pune' });
+    expect(out.text).toBe('');
+  });
+
+  it('still parses list literals inside args when calls are concatenated', () => {
+    const out = parseAssistantOutput(
+      "[set_alarm(minutes=5, days=['mon', 'tue'])][get_weather(location='Goa')]",
+      'pythonic',
+      TOOLS,
+    );
+    expect(out.calls).toHaveLength(2);
+    expect(out.calls[0]!.arguments).toEqual({ minutes: 5, days: ['mon', 'tue'] });
+  });
+
   it('handles numbers, booleans, lists and single quotes', () => {
     const out = parseAssistantOutput(
       '[set_alarm(minutes=10, repeat=True, days=[\'mon\', \'tue\'], label="tea")]',
