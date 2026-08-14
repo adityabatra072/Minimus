@@ -237,6 +237,11 @@ RCT_EXPORT_METHOD(calendarQuery:(double)startMillis
     NSArray<EKEvent *> *events = [store eventsMatchingPredicate:predicate];
     NSMutableArray *out = [NSMutableArray array];
     for (EKEvent *event in events) {
+      // All-day entries (holidays, birthdays from subscribed calendars) span
+      // the whole day — treating them as busy time makes every free gap
+      // vanish, and "find me 90 minutes" against zero gaps stalls the model.
+      // They don't block time; skip them.
+      if (event.isAllDay) continue;
       [out addObject:@{
         @"title": event.title ?: @"(untitled)",
         @"startMillis": @([event.startDate timeIntervalSince1970] * 1000.0),

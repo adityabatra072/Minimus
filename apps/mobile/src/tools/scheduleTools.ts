@@ -1,6 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 import type { ToolDefinition } from '@minimus/agent-core';
 import { parseWhen, scheduler } from '../services/scheduler';
+import { diag } from '../services/diag';
 
 /**
  * Scheduling tools backed by the MinimusTools native module (Android for now;
@@ -193,6 +194,12 @@ export function scheduleTools(): ToolDefinition[] {
         const wakingEnd = new Date(day);
         wakingEnd.setHours(22, 0, 0, 0);
 
+        const gaps = freeGaps(events, wakingStart.getTime(), wakingEnd.getTime());
+        // The RESULT shape is the diagnosis when a calendar run stalls: a
+        // subscribed-calendar avalanche or zero gaps must be visible in syslog.
+        diag(
+          `calendar_query ${dayStart.toISOString().slice(0, 10)}: ${events.length} events, ${gaps.length} gaps ${JSON.stringify(gaps.map((g) => `${g.from}-${g.to}`))}`,
+        );
         return {
           date: dayStart.toISOString().slice(0, 10),
           events: events.map((e) => ({
@@ -200,7 +207,7 @@ export function scheduleTools(): ToolDefinition[] {
             from: hhmm(e.startMillis),
             to: hhmm(e.endMillis),
           })),
-          free_gaps: freeGaps(events, wakingStart.getTime(), wakingEnd.getTime()),
+          free_gaps: gaps,
         };
       },
     },

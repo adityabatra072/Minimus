@@ -217,12 +217,16 @@ class MinimusToolsModule(private val ctx: ReactApplicationContext) :
                 CalendarContract.Instances.TITLE,
                 CalendarContract.Instances.BEGIN,
                 CalendarContract.Instances.END,
+                CalendarContract.Instances.ALL_DAY,
             )
             val events = Arguments.createArray()
             ctx.contentResolver.query(
                 uri, projection, null, null, CalendarContract.Instances.BEGIN + " ASC",
             )?.use { cursor ->
                 while (cursor.moveToNext()) {
+                    // All-day entries (holidays, birthdays) span the whole day
+                    // and erase every free gap if counted as busy time. Skip.
+                    if (cursor.getInt(3) == 1) continue
                     val map = Arguments.createMap()
                     map.putString("title", cursor.getString(0) ?: "(untitled)")
                     map.putDouble("startMillis", cursor.getLong(1).toDouble())
