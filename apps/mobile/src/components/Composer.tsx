@@ -19,6 +19,9 @@ export function Composer({
   voiceState = 'idle',
   voiceDetail,
   onMic,
+  attachment,
+  onAttach,
+  onClearAttachment,
 }: {
   value: string;
   onChange: (t: string) => void;
@@ -31,6 +34,10 @@ export function Composer({
   voiceDetail?: string;
   /** Mic tap: start listening / cancel listening / cut speech short. */
   onMic?: () => void;
+  /** Attached image filename, when one is staged for the next message. */
+  attachment?: string | null;
+  onAttach?: () => void;
+  onClearAttachment?: () => void;
 }): React.JSX.Element {
   const canSend = value.trim().length > 0 && !running;
   const voiceBusy = voiceState !== 'idle';
@@ -47,7 +54,22 @@ export function Composer({
             : 'Ask me anything';
   return (
     <View style={styles.wrap}>
+      {attachment ? (
+        <View style={styles.attachChip}>
+          <Text style={styles.attachText} numberOfLines={1}>
+            🖼 {attachment}
+          </Text>
+          <TouchableOpacity onPress={onClearAttachment} hitSlop={8}>
+            <Text style={styles.attachClear}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <View style={[styles.pill, voiceState === 'listening' && styles.pillListening]}>
+        {onAttach ? (
+          <TouchableOpacity style={styles.mic} onPress={onAttach} disabled={running} hitSlop={8}>
+            <Text style={styles.attachGlyph}>＋</Text>
+          </TouchableOpacity>
+        ) : null}
         {onMic ? (
           <TouchableOpacity
             style={[styles.mic, voiceBusy && styles.micOn]}
@@ -126,6 +148,23 @@ const styles = StyleSheet.create({
     backgroundColor: color.faint,
   },
   micGlyphOn: { backgroundColor: color.bg0 },
+  attachGlyph: { color: color.faint, fontSize: 18, fontWeight: '600' },
+  attachChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: space(2),
+    backgroundColor: color.bg1,
+    borderWidth: 1,
+    borderColor: color.line,
+    borderRadius: radius.chip,
+    paddingHorizontal: space(3),
+    paddingVertical: space(1.5),
+    marginBottom: space(2),
+    maxWidth: '80%',
+  },
+  attachText: { color: color.dim, fontSize: 12, flexShrink: 1 },
+  attachClear: { color: color.faint, fontSize: 13 },
   action: {
     width: 38,
     height: 38,

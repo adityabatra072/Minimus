@@ -41,6 +41,8 @@
 		<string>photos-redirect</string>
 		<string>message</string>
 	</array>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Attach a photo for the on-device model to look at. Images never leave this phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The voice assistant listens when you tap the mic or say the wake phrase. Audio never leaves this phone.</string>
 	<key>NSAppTransportSecurity</key>

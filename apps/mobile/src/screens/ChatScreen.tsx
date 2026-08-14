@@ -35,6 +35,8 @@ import {
 } from '../services/intent';
 import { userExcludedTools, userToolGroups } from '../services/toolPlatform';
 import { ensureVoiceReady, VoicePipeline, type VoiceState } from '../services/voice';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { setAttachedImage } from '../tools/visionTools';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -144,6 +146,7 @@ export default function ChatScreen({
   const listRef = useRef<FlatList<Item>>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [voiceDetail, setVoiceDetail] = useState('');
+  const [attachment, setAttachment] = useState<{ path: string; name: string } | null>(null);
   const voiceRef = useRef<VoicePipeline | null>(null);
   const speakAnswerRef = useRef(false);
 
@@ -252,7 +255,17 @@ export default function ChatScreen({
       ];
       // User-added tools (custom HTTP, MCP) ride along on every run — the
       // user opted them in explicitly, and each call is approval-gated.
-      const toolGroups = [...routeToolGroups(prompt), ...userToolGroups()];
+      // The vision group exists only while an image is attached.
+      const toolGroups = [
+        ...routeToolGroups(prompt),
+        ...userToolGroups(),
+        ...(attachment ? ['vision'] : []),
+      ];
+      if (attachment) {
+        preambleLines.push(
+          'The user attached an image to this message. Call describe_image to see it before answering anything about it.',
+        );
+      }
       diag(`tool groups: ${toolGroups.join(',')}`);
 
       let railId: string | null = null;
@@ -329,6 +342,9 @@ export default function ChatScreen({
         setRunning(false);
         setWorking(false);
         abortRef.current = null;
+        // One attachment = one message; the tool must not see stale images.
+        setAttachment(null);
+        setAttachedImage(null);
         scrollDown();
       }
       return finalText;
@@ -434,8 +450,17 @@ export default function ChatScreen({
         }
       }
     },
-    [running, activeModelId, remote, requireApprovals],
+    [running, activeModelId, remote, requireApprovals, attachment],
   );
+
+  const pickImage = useCallback(async () => {
+    const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1, quality: 0.8 });
+    const asset = result.assets?.[0];
+    if (!asset?.uri) return;
+    const path = asset.uri.replace(/^file:\/\//, '');
+    setAttachment({ path, name: asset.fileName ?? 'photo' });
+    setAttachedImage(path);
+  }, []);
 
   // Voice: mic tap → listen → transcribe → same run() as typed input →
   // speak the answer. Hands-free mode (Settings) re-arms the mic after each
@@ -549,6 +574,12 @@ export default function ChatScreen({
         voiceState={voiceState}
         voiceDetail={voiceDetail}
         onMic={() => void onMic()}
+        attachment={attachment?.name ?? null}
+        onAttach={() => void pickImage()}
+        onClearAttachment={() => {
+          setAttachment(null);
+          setAttachedImage(null);
+        }}
       />
     </KeyboardAvoidingView>
   );

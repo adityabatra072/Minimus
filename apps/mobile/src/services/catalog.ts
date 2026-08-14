@@ -80,6 +80,22 @@ const VOICE_MODELS = [
   },
 ];
 
+/** Vision: SmolVLM-500M — the same artifact the SDK's examples ship. */
+export const VLM_MODEL_ID = 'smolvlm-500m-instruct-q8_0';
+
+export async function registerVlmModel(): Promise<void> {
+  await RunAnywhere.models
+    .register({
+      id: VLM_MODEL_ID,
+      name: 'SmolVLM 500M (image understanding)',
+      url: 'https://github.com/RunanywhereAI/sherpa-onnx/releases/download/runanywhere-vlm-models-v1/smolvlm-500m-instruct-q8_0.tar.gz',
+      framework: InferenceFramework.INFERENCE_FRAMEWORK_LLAMA_CPP,
+      category: ModelCategory.MODEL_CATEGORY_MULTIMODAL,
+      memoryRequirementBytes: 700_000_000,
+    })
+    .catch(() => undefined);
+}
+
 export async function registerVoiceModels(): Promise<void> {
   for (const entry of VOICE_MODELS) {
     await RunAnywhere.models

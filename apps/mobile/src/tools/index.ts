@@ -7,6 +7,7 @@ import { commsTools } from './commsTools';
 import { musicTools } from './musicTools';
 import { memoryTools } from './memoryTools';
 import { bindMacroRegistry, macroTools } from './macroTools';
+import { visionTools } from './visionTools';
 
 /**
  * Build the live tool registry for this device. Only WORKING tools get
@@ -36,6 +37,7 @@ export function buildToolRegistry(): ToolRegistry {
     ...musicTools(),
     ...memoryTools(),
     ...macroTools(),
+    ...visionTools(),
     ...(hasNativeTools ? scheduleTools() : []),
   ]) {
     registry.register(tool);
