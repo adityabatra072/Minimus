@@ -5,7 +5,7 @@ import { InferenceFramework, ModelCategory } from '@runanywhere/proto-ts/model_t
  * Preloaded model catalog. Curated for agentic tool calling — every entry here
  * was scored on the packages/eval demo suite before inclusion.
  *
- * iPhone 15 / OnePlus 9R tier (≤ ~2.8GB download, ≤ ~3.5GB RAM):
+ * Standard-phone tier, ~6GB device RAM (≤ ~2.8GB download, ≤ ~3.5GB RAM):
  *  - LFM2.5-2.6B  — primary agent model (ToolSandbox 77.83, BFCLv4 56.88)
  *  - Qwen3.5-4B   — reasoning pick (TAU2 79.9), borderline RAM: gated by device
  *  - LFM2-1.2B-Tool — fast tier, purpose-built for tool calls

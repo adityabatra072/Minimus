@@ -88,6 +88,10 @@ function domainOf(url: string): string {
   return m?.[1] ?? url;
 }
 
+// One agent generation at a time, app-wide: the native LLM has one context,
+// and this survives ChatScreen unmount/remount (screen switches).
+const globalRunLock = { current: false };
+
 // Seeded with time so Fast Refresh (which resets module state) can never
 // mint ids that collide with items already in React state.
 let idCounter = 0;
@@ -140,7 +144,11 @@ export default function ChatScreen({
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
-  const runningRef = useRef(false);
+  // Module-scoped guard (see globalRunLock): navigating to Models/Settings
+  // UNMOUNTS this screen; a component-local ref forgets the in-flight run and
+  // a fresh mount happily starts a second one — QA caught two generations
+  // fighting over the single native LLM (191s + 117s overlapped).
+  const runningRef = globalRunLock;
   const [working, setWorking] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Item>>(null);
@@ -519,7 +527,15 @@ export default function ChatScreen({
     }
   }, [voiceState, getVoice]);
 
-  useEffect(() => () => voiceRef.current?.stop(), []);
+  useEffect(
+    () => () => {
+      voiceRef.current?.stop();
+      // Unmount (screen switch) must not leave a zombie generation running
+      // detached — abort it; the transcript is already persisted.
+      abortRef.current?.abort();
+    },
+    [],
+  );
 
   // Deferred agency: when a scheduled task comes due the scheduler runs a
   // full agent loop through this same path, so the audience watches it think.

@@ -31,3 +31,4 @@ replay_pid*.log
 # local artifacts (IPAs, installers, sideload logs)
 dist-ios/
 sideloadlydaemon.log
+hs_err_*.log
