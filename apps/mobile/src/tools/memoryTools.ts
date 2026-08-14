@@ -13,10 +13,20 @@ import type { ToolDefinition } from '@minimus/agent-core';
 
 const KEY = 'minimus.memories.v1';
 
-interface Memory {
+export interface Memory {
   id: string;
   text: string;
   savedAt: string; // ISO date
+}
+
+/** Settings UI: everything the agent remembers, oldest first. */
+export async function listMemories(): Promise<Memory[]> {
+  return loadAll();
+}
+
+export async function removeMemory(id: string): Promise<void> {
+  const memories = (await loadAll()).filter((m) => m.id !== id);
+  await saveAll(memories);
 }
 
 async function loadAll(): Promise<Memory[]> {

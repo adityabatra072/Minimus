@@ -48,6 +48,12 @@ async function saveMacros(macros: Macro[]): Promise<void> {
   await AsyncStorage.setItem(KEY, JSON.stringify(macros));
 }
 
+/** Settings UI: un-teach a phrase. */
+export async function removeMacro(name: string): Promise<void> {
+  const macros = (await loadMacros()).filter((m) => normalize(m.name) !== normalize(name));
+  await saveMacros(macros);
+}
+
 function normalize(name: string): string {
   return name.trim().toLowerCase();
 }

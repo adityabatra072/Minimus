@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -11,6 +11,9 @@ import {
 import { useModelStore } from '../stores/modelStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { listMemories, removeMemory, type Memory } from '../tools/memoryTools';
+import { loadMacros, removeMacro, type Macro } from '../tools/macroTools';
+import { scheduler, type ScheduledTask } from '../services/scheduler';
 import { color, font, radius, space } from '../theme';
 
 /**
@@ -37,6 +40,16 @@ export default function SettingsScreen({
   const sessions = useSessionStore((s) => s.sessions);
   const deleteSession = useSessionStore((s) => s.deleteSession);
   const [confirmWipe, setConfirmWipe] = useState(false);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [macros, setMacros] = useState<Macro[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<ScheduledTask[]>([]);
+
+  const refreshAgentData = useCallback(() => {
+    void listMemories().then(setMemories).catch(() => setMemories([]));
+    void loadMacros().then(setMacros).catch(() => setMacros([]));
+    void scheduler.listPending().then(setPendingTasks).catch(() => setPendingTasks([]));
+  }, []);
+  useEffect(refreshAgentData, [refreshAgentData]);
 
   return (
     <View style={styles.root}>
@@ -126,6 +139,74 @@ export default function SettingsScreen({
             trackColor={{ true: color.amberDeep, false: color.bg2 }}
             thumbColor={requireApprovals ? color.amber : color.faint}
           />
+        </View>
+
+        <Text style={styles.sectionLabel}>what the agent knows</Text>
+        <View style={styles.row}>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowTitle}>Memories ({memories.length})</Text>
+            {memories.length === 0 ? (
+              <Text style={styles.rowHint}>Nothing remembered yet.</Text>
+            ) : (
+              memories.map((m) => (
+                <View key={m.id} style={styles.dataRow}>
+                  <Text style={styles.dataText} numberOfLines={2}>
+                    {m.text}
+                  </Text>
+                  <TouchableOpacity
+                    hitSlop={10}
+                    onPress={() => void removeMemory(m.id).then(refreshAgentData)}
+                  >
+                    <Text style={styles.delete}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowTitle}>Taught phrases ({macros.length})</Text>
+            {macros.length === 0 ? (
+              <Text style={styles.rowHint}>No phrases taught yet.</Text>
+            ) : (
+              macros.map((m) => (
+                <View key={m.name} style={styles.dataRow}>
+                  <Text style={styles.dataText} numberOfLines={2}>
+                    “{m.name}” · {m.steps.length} step{m.steps.length === 1 ? '' : 's'}
+                  </Text>
+                  <TouchableOpacity
+                    hitSlop={10}
+                    onPress={() => void removeMacro(m.name).then(refreshAgentData)}
+                  >
+                    <Text style={styles.delete}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowTitle}>Scheduled tasks ({pendingTasks.length})</Text>
+            {pendingTasks.length === 0 ? (
+              <Text style={styles.rowHint}>Nothing scheduled.</Text>
+            ) : (
+              pendingTasks.map((t) => (
+                <View key={t.id} style={styles.dataRow}>
+                  <Text style={styles.dataText} numberOfLines={2}>
+                    {t.instruction}
+                  </Text>
+                  <TouchableOpacity
+                    hitSlop={10}
+                    onPress={() => void scheduler.cancel(t.id).then(refreshAgentData)}
+                  >
+                    <Text style={styles.delete}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
         </View>
 
         <Text style={styles.sectionLabel}>data</Text>
@@ -241,6 +322,14 @@ const styles = StyleSheet.create({
   rowHint: { color: color.dim, fontSize: 12, lineHeight: 17 },
   chev: { color: color.faint, fontSize: 22 },
   danger: { color: color.danger },
+  dataRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space(2),
+    paddingVertical: space(1),
+  },
+  dataText: { color: color.dim, fontSize: 12, lineHeight: 17, flex: 1 },
+  delete: { color: color.faint, fontSize: 14 },
   remoteFields: { gap: space(2) },
   field: {
     backgroundColor: color.bg1,
