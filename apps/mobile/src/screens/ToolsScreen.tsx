@@ -183,7 +183,13 @@ function McpForm({
     <View style={styles.form}>
       <Input label="Name" value={name} onChange={setName} placeholder="slack" />
       <Input label="URL" value={url} onChange={setUrl} placeholder="https://mcp.example.com/mcp" />
-      <Input label="Authorization header (optional)" value={auth} onChange={setAuth} placeholder="Bearer …" secure />
+      <Input
+        label='Auth (optional): "Bearer KEY" or "header-name: KEY"'
+        value={auth}
+        onChange={setAuth}
+        placeholder="x-api-key: ak_…"
+        secure
+      />
       <FormButtons
         canSave={name.trim() !== '' && url.trim().startsWith('http')}
         onSave={() => onAdd({ name: name.trim(), url: url.trim(), auth: auth.trim() })}

@@ -24,6 +24,23 @@ interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
+/**
+ * The auth field accepts two forms:
+ *   "Bearer abc123"          → Authorization: Bearer abc123
+ *   "x-api-key: abc123"      → x-api-key: abc123   (Composio-style)
+ * A colon BEFORE the first space marks the header-name form.
+ */
+export function authHeader(auth: string): [string, string] | null {
+  const trimmed = auth.trim();
+  if (!trimmed) return null;
+  const colon = trimmed.indexOf(':');
+  const space = trimmed.indexOf(' ');
+  if (colon > 0 && (space === -1 || colon < space)) {
+    return [trimmed.slice(0, colon).trim(), trimmed.slice(colon + 1).trim()];
+  }
+  return ['authorization', trimmed];
+}
+
 function parseBody(text: string, contentType: string): JsonRpcResponse {
   if (contentType.includes('text/event-stream')) {
     // Last data: line wins — request/response servers send exactly one.
@@ -55,7 +72,8 @@ export class McpClient {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
     };
-    if (this.config.auth) headers['authorization'] = this.config.auth;
+    const auth = authHeader(this.config.auth);
+    if (auth) headers[auth[0]] = auth[1];
     if (this.sessionId) headers['mcp-session-id'] = this.sessionId;
 
     const res = await fetch(this.config.url, {
@@ -81,7 +99,8 @@ export class McpClient {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
     };
-    if (this.config.auth) headers['authorization'] = this.config.auth;
+    const auth = authHeader(this.config.auth);
+    if (auth) headers[auth[0]] = auth[1];
     if (this.sessionId) headers['mcp-session-id'] = this.sessionId;
     await fetch(this.config.url, {
       method: 'POST',
