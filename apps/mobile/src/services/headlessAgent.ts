@@ -12,6 +12,7 @@ import {
   routeToolGroups,
   teachingToolExclusions,
 } from './intent';
+import { userExcludedTools, userToolGroups } from './toolPlatform';
 
 /**
  * Runs an agent task with no screen attached.
@@ -49,11 +50,12 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
   for await (const ev of new AgentLoop().run(instruction, {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
-    toolGroups: routeToolGroups(instruction),
+    toolGroups: [...routeToolGroups(instruction), ...userToolGroups()],
     excludeTools: [
       ...deferredToolExclusions(instruction),
       ...teachingToolExclusions(instruction),
       ...(macroHit?.exclude ?? []),
+      ...userExcludedTools(),
     ],
     preamble,
     approvals: async () => false,

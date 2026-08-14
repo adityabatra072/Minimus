@@ -8,14 +8,18 @@ import ModelsScreen from './src/screens/ModelsScreen';
 import RehearsalScreen from './src/screens/RehearsalScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import ToolsScreen from './src/screens/ToolsScreen';
 import { useModelStore } from './src/stores/modelStore';
 import { useSettingsStore } from './src/stores/settingsStore';
 import { useSessionStore } from './src/stores/sessionStore';
+import { useToolStore } from './src/stores/toolStore';
 import { scheduler } from './src/services/scheduler';
 import { runAgentHeadless } from './src/services/headlessAgent';
+import { syncToolPlatform } from './src/services/toolPlatform';
+import { getToolRegistry } from './src/tools';
 
 type AppState = 'initializing' | 'setup' | 'ready' | 'error';
-type Overlay = 'none' | 'models' | 'rehearsal' | 'settings' | 'history';
+type Overlay = 'none' | 'models' | 'rehearsal' | 'settings' | 'history' | 'tools';
 
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<AppState>('initializing');
@@ -29,8 +33,12 @@ export default function App(): React.JSX.Element {
         useModelStore.getState().hydrate(),
         useSettingsStore.getState().hydrate(),
         useSessionStore.getState().hydrate(),
+        useToolStore.getState().hydrate(),
       ]);
       await initSdk();
+      // Custom tools register instantly; MCP servers connect in the
+      // background — boot must not block on someone's slow endpoint.
+      void syncToolPlatform(getToolRegistry());
       setState('setup');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -73,6 +81,8 @@ export default function App(): React.JSX.Element {
               onClose={() => setOverlayScreen('none')}
               onOpenModels={() => setOverlayScreen('models')}
             />
+          ) : overlayScreen === 'tools' ? (
+            <ToolsScreen onClose={() => setOverlayScreen('none')} />
           ) : overlayScreen === 'history' ? (
             <HistoryScreen
               onClose={() => setOverlayScreen('none')}
@@ -87,6 +97,7 @@ export default function App(): React.JSX.Element {
               onOpenRehearsal={() => setOverlayScreen('rehearsal')}
               onOpenSettings={() => setOverlayScreen('settings')}
               onOpenHistory={() => setOverlayScreen('history')}
+              onOpenTools={() => setOverlayScreen('tools')}
             />
           ))}
         {state === 'error' && (

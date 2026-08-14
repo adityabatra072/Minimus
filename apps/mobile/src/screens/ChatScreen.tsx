@@ -33,6 +33,7 @@ import {
   teachingPreamble,
   teachingToolExclusions,
 } from '../services/intent';
+import { userExcludedTools, userToolGroups } from '../services/toolPlatform';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -121,11 +122,13 @@ export default function ChatScreen({
   onOpenRehearsal,
   onOpenSettings,
   onOpenHistory,
+  onOpenTools,
 }: {
   onOpenModels?: () => void;
   onOpenRehearsal?: () => void;
   onOpenSettings?: () => void;
   onOpenHistory?: () => void;
+  onOpenTools?: () => void;
 }): React.JSX.Element {
   const activeModelId = useModelStore((s) => s.activeModelId);
   const remote = useSettingsStore((s) => s.remote);
@@ -240,8 +243,11 @@ export default function ChatScreen({
         ...deferredToolExclusions(prompt),
         ...teachingToolExclusions(prompt),
         ...(macroHit?.exclude ?? []),
+        ...userExcludedTools(),
       ];
-      const toolGroups = routeToolGroups(prompt);
+      // User-added tools (custom HTTP, MCP) ride along on every run — the
+      // user opted them in explicitly, and each call is approval-gated.
+      const toolGroups = [...routeToolGroups(prompt), ...userToolGroups()];
       diag(`tool groups: ${toolGroups.join(',')}`);
 
       let railId: string | null = null;
@@ -454,6 +460,7 @@ export default function ChatScreen({
         onOpenRehearsal={onOpenRehearsal}
         onOpenSettings={onOpenSettings}
         onOpenHistory={onOpenHistory}
+        onOpenTools={onOpenTools}
         onNewChat={running ? undefined : () => useSessionStore.getState().newSession()}
       />
       {items.length === 0 ? (
@@ -485,12 +492,14 @@ function Header({
   onOpenRehearsal,
   onOpenSettings,
   onOpenHistory,
+  onOpenTools,
   onNewChat,
 }: {
   onOpenModels?: () => void;
   onOpenRehearsal?: () => void;
   onOpenSettings?: () => void;
   onOpenHistory?: () => void;
+  onOpenTools?: () => void;
   onNewChat?: () => void;
 }): React.JSX.Element {
   const remote = useSettingsStore((s) => s.remote);
@@ -515,6 +524,7 @@ function Header({
   // a phone header is not a toolbar.
   const menuItems: { label: string; action?: () => void; on?: boolean }[] = [
     ...(onOpenHistory ? [{ label: 'Chats', action: onOpenHistory }] : []),
+    ...(onOpenTools ? [{ label: 'Tools', action: onOpenTools }] : []),
     ...(onOpenModels ? [{ label: 'Models', action: onOpenModels }] : []),
     ...(onOpenSettings ? [{ label: 'Settings', action: onOpenSettings }] : []),
     ...(onOpenRehearsal ? [{ label: 'Rehearsal', action: onOpenRehearsal }] : []),
