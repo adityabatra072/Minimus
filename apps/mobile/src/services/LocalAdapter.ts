@@ -101,6 +101,12 @@ export class LocalAdapter implements ModelAdapter {
       temperature: options.temperature,
       topP: options.topP,
       maxOutputTokens: options.maxOutputTokens,
+      // THE week-long "silent turn" bug: with reasoning unset the runtime
+      // STRIPS thought spans from the stream — a turn the model spent
+      // thinking surfaced as zero events and read as instant-EOS
+      // (gen END: events=2 thought=0 text=0 on a 69s generation). The
+      // harness owns think-tag parsing, so ask for thoughts verbatim.
+      reasoning: { mode: 'on', includeInOutput: true },
       // Stop on the next turn header: with a verbatim prompt the model owns
       // turn boundaries, and some models keep writing the next turn.
       stopSequences: [IM_END, IM_START, ...(options.stopSequences ?? [])],
