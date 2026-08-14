@@ -68,6 +68,9 @@ export function buildSystemPrompt(tools: ToolDefinition[], opts: PromptOptions):
     'Use tools only when needed — if you already know the answer, answer directly without tools.',
     'Never repeat a tool call you already made; its result is already above. Once you have what you need, STOP calling tools and answer.',
     'Never invent tool results. Never call tools that are not listed.',
+    // Visible thinking is billed against a phone-sized token budget and the
+    // user's patience — long deliberation is the #1 latency cost on device.
+    'Think briefly: a couple of sentences of thinking at most, then act.',
   );
   // Usage hints render inline under each tool line only. They used to repeat
   // in a trailing section, which cost ~200 prompt tokens — real money on

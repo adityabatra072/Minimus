@@ -150,6 +150,7 @@ export class AgentLoop {
     let streakCount = 0;
     let streakNudged = false;
     let emptyAnswerNudges = 0;
+    let suppressThinkingNextTurn = false;
     // Two chances, not one: on-device the model can emit consecutive silent
     // turns mid-task (think-then-EOS), and a single nudge left a calendar
     // booking half-done on a live demo take.
@@ -169,8 +170,13 @@ export class AgentLoop {
           temperature: policy.temperature,
           topP: policy.topP,
           maxOutputTokens: policy.maxOutputTokens,
+          // After a thinking overrun, polite nudges get ignored (observed:
+          // 2000+ chars of re-thinking). Pre-close the think block instead —
+          // the model physically starts in answer mode.
+          ...(suppressThinkingNextTurn ? { suppressThinking: true } : {}),
           ...(config.signal ? { signal: config.signal } : {}),
         });
+        suppressThinkingNextTurn = false;
         for await (const ev of stream) {
           if (ev.type === 'delta') {
             raw += ev.text;
@@ -247,6 +253,7 @@ export class AgentLoop {
           content:
             'You ran out of space thinking. Decide NOW: reply with the single tool call or the short final answer. Keep thinking to one sentence.',
         });
+        suppressThinkingNextTurn = true;
         yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: 'thinking overrun' };
         yield { type: 'turn_finished', turn };
         continue;
@@ -371,7 +378,9 @@ export class AgentLoop {
               result: cached.slice(0, 1000),
             }),
           });
-          yield { type: 'tool_call_finished', call, result: cached, isError: false };
+          // No tool_call_finished here: nothing executed, and painting a
+          // second op on the UI rail makes the agent look like it stutters.
+          yield { type: 'duplicate_call_suppressed', call };
           continue;
         }
 

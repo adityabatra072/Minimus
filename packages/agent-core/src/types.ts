@@ -75,6 +75,8 @@ export type AgentEvent =
   | { type: 'approval_resolved'; call: ToolCall; approved: boolean }
   | { type: 'tool_call_started'; call: ToolCall }
   | { type: 'tool_call_finished'; call: ToolCall; result: string; isError: boolean }
+  /** A repeat of an already-executed call was served from cache — nothing ran. UIs should not render it. */
+  | { type: 'duplicate_call_suppressed'; call: ToolCall }
   | { type: 'parse_retry'; attempt: number; reason: string }
   | { type: 'compaction'; droppedMessages: number }
   | { type: 'turn_finished'; turn: number }
