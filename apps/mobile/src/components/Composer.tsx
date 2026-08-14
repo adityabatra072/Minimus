@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import type { VoiceState } from '../services/voice';
 import { color, radius, space } from '../theme';
 
 export function Composer({
@@ -15,24 +16,55 @@ export function Composer({
   onSend,
   onStop,
   running,
+  voiceState = 'idle',
+  voiceDetail,
+  onMic,
 }: {
   value: string;
   onChange: (t: string) => void;
   onSend: () => void;
   onStop: () => void;
   running: boolean;
+  /** Current voice pipeline state — drives the mic button + placeholder. */
+  voiceState?: VoiceState;
+  /** Progress label ("downloading ears 40%") shown while preparing. */
+  voiceDetail?: string;
+  /** Mic tap: start listening / cancel listening / cut speech short. */
+  onMic?: () => void;
 }): React.JSX.Element {
   const canSend = value.trim().length > 0 && !running;
+  const voiceBusy = voiceState !== 'idle';
+  const placeholder = running
+    ? 'Working…'
+    : voiceState === 'listening'
+      ? 'Listening…'
+      : voiceState === 'transcribing'
+        ? 'Heard you — transcribing…'
+        : voiceState === 'speaking'
+          ? 'Speaking — tap mic to stop'
+          : voiceState === 'preparing'
+            ? voiceDetail || 'Preparing voice…'
+            : 'Ask me anything';
   return (
     <View style={styles.wrap}>
-      <View style={styles.pill}>
+      <View style={[styles.pill, voiceState === 'listening' && styles.pillListening]}>
+        {onMic ? (
+          <TouchableOpacity
+            style={[styles.mic, voiceBusy && styles.micOn]}
+            onPress={onMic}
+            disabled={running && !voiceBusy}
+            hitSlop={8}
+          >
+            <View style={[styles.micGlyph, voiceBusy && styles.micGlyphOn]} />
+          </TouchableOpacity>
+        ) : null}
         <TextInput
           style={styles.input}
           value={value}
           onChangeText={onChange}
-          placeholder={running ? 'Working…' : 'Ask me anything'}
-          placeholderTextColor={color.faint}
-          editable={!running}
+          placeholder={placeholder}
+          placeholderTextColor={voiceState === 'listening' ? color.amber : color.faint}
+          editable={!running && !voiceBusy}
           onSubmitEditing={onSend}
           returnKeyType="send"
           multiline={false}
@@ -70,11 +102,30 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: color.line,
-    paddingLeft: space(4),
+    paddingLeft: space(1.5),
     paddingRight: space(1.5),
     height: 52,
+    gap: space(1.5),
   },
+  pillListening: { borderColor: color.amber },
   input: { flex: 1, color: color.text, fontSize: 16, paddingVertical: 0 },
+  mic: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.bg2,
+  },
+  micOn: { backgroundColor: color.amber },
+  // A simple capsule-on-stand mic glyph drawn with views — no icon deps.
+  micGlyph: {
+    width: 10,
+    height: 16,
+    borderRadius: 5,
+    backgroundColor: color.faint,
+  },
+  micGlyphOn: { backgroundColor: color.bg0 },
   action: {
     width: 38,
     height: 38,

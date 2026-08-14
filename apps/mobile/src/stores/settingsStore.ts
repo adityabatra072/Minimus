@@ -19,36 +19,45 @@ interface SettingsState {
   remote: RemoteEndpoint;
   /** Approval prompts for side-effecting tools (email/SMS/call). */
   requireApprovals: boolean;
+  /** Hands-free voice: re-arm the mic after each turn, gated by "E.V". */
+  voiceHandsFree: boolean;
   hydrate: () => Promise<void>;
   setRemote: (patch: Partial<RemoteEndpoint>) => void;
   setRequireApprovals: (on: boolean) => void;
+  setVoiceHandsFree: (on: boolean) => void;
 }
 
 const KEY = 'minimus.settings.v1';
 
-function persist(state: Pick<SettingsState, 'remote' | 'requireApprovals'>) {
+type Persisted = Pick<SettingsState, 'remote' | 'requireApprovals' | 'voiceHandsFree'>;
+
+function persist(state: Persisted) {
   AsyncStorage.setItem(
     KEY,
-    JSON.stringify({ remote: state.remote, requireApprovals: state.requireApprovals }),
+    JSON.stringify({
+      remote: state.remote,
+      requireApprovals: state.requireApprovals,
+      voiceHandsFree: state.voiceHandsFree,
+    }),
   ).catch(() => undefined);
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   remote: { enabled: false, baseUrl: '', apiKey: '', model: '' },
   requireApprovals: true,
+  voiceHandsFree: false,
 
   hydrate: async () => {
     const raw = await AsyncStorage.getItem(KEY).catch(() => null);
     if (!raw) return;
     try {
-      const saved = JSON.parse(raw) as Partial<
-        Pick<SettingsState, 'remote' | 'requireApprovals'>
-      >;
+      const saved = JSON.parse(raw) as Partial<Persisted>;
       set({
         ...(saved.remote ? { remote: { ...get().remote, ...saved.remote } } : {}),
         ...(saved.requireApprovals !== undefined
           ? { requireApprovals: saved.requireApprovals }
           : {}),
+        ...(saved.voiceHandsFree !== undefined ? { voiceHandsFree: saved.voiceHandsFree } : {}),
       });
     } catch {
       /* corrupt settings — keep defaults */
@@ -58,11 +67,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setRemote: (patch: Partial<RemoteEndpoint>) => {
     const remote = { ...get().remote, ...patch };
     set({ remote });
-    persist({ remote, requireApprovals: get().requireApprovals });
+    persist({ ...get(), remote });
   },
 
   setRequireApprovals: (on: boolean) => {
     set({ requireApprovals: on });
-    persist({ remote: get().remote, requireApprovals: on });
+    persist({ ...get(), requireApprovals: on });
+  },
+
+  setVoiceHandsFree: (on: boolean) => {
+    set({ voiceHandsFree: on });
+    persist({ ...get(), voiceHandsFree: on });
   },
 }));

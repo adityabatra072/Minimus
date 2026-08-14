@@ -32,6 +32,8 @@ export default function SettingsScreen({
   const setRemote = useSettingsStore((s) => s.setRemote);
   const requireApprovals = useSettingsStore((s) => s.requireApprovals);
   const setRequireApprovals = useSettingsStore((s) => s.setRequireApprovals);
+  const voiceHandsFree = useSettingsStore((s) => s.voiceHandsFree);
+  const setVoiceHandsFree = useSettingsStore((s) => s.setVoiceHandsFree);
   const sessions = useSessionStore((s) => s.sessions);
   const deleteSession = useSessionStore((s) => s.deleteSession);
   const [confirmWipe, setConfirmWipe] = useState(false);
@@ -92,6 +94,23 @@ export default function SettingsScreen({
             />
           </View>
         ) : null}
+
+        <Text style={styles.sectionLabel}>voice</Text>
+        <View style={styles.rowSwitch}>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowTitle}>Hands-free mode</Text>
+            <Text style={styles.rowHint}>
+              After each answer the mic re-arms and listens for “E.V …” — say the wake phrase, then
+              your request. Off = tap the mic each time.
+            </Text>
+          </View>
+          <Switch
+            value={voiceHandsFree}
+            onValueChange={setVoiceHandsFree}
+            trackColor={{ true: color.amberDeep, false: color.bg2 }}
+            thumbColor={voiceHandsFree ? color.amber : color.faint}
+          />
+        </View>
 
         <Text style={styles.sectionLabel}>safety</Text>
         <View style={styles.rowSwitch}>

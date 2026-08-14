@@ -34,6 +34,7 @@ import {
   teachingToolExclusions,
 } from '../services/intent';
 import { userExcludedTools, userToolGroups } from '../services/toolPlatform';
+import { ensureVoiceReady, VoicePipeline, type VoiceState } from '../services/voice';
 import { ActionRail, type Operation } from '../components/ActionRail';
 import { AgentText } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
@@ -141,6 +142,10 @@ export default function ChatScreen({
   const [working, setWorking] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Item>>(null);
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [voiceDetail, setVoiceDetail] = useState('');
+  const voiceRef = useRef<VoicePipeline | null>(null);
+  const speakAnswerRef = useRef(false);
 
   const scrollDown = () =>
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -432,6 +437,65 @@ export default function ChatScreen({
     [running, activeModelId, remote, requireApprovals],
   );
 
+  // Voice: mic tap → listen → transcribe → same run() as typed input →
+  // speak the answer. Hands-free mode (Settings) re-arms the mic after each
+  // turn and requires the "E.V" wake phrase so table noise can't trigger it.
+  const runRef = useRef(run);
+  runRef.current = run;
+  const handsFree = useSettingsStore((s) => s.voiceHandsFree);
+  const handsFreeRef = useRef(handsFree);
+  handsFreeRef.current = handsFree;
+
+  const getVoice = useCallback((): VoicePipeline => {
+    if (!voiceRef.current) {
+      voiceRef.current = new VoicePipeline({
+        onState: (state, detail) => {
+          setVoiceState(state);
+          if (detail) diag(`voice: ${state} (${detail})`);
+        },
+        onUtterance: (text) => {
+          void (async () => {
+            const finalText = await runRef.current(text, 'user');
+            const pipeline = voiceRef.current;
+            if (!pipeline) return;
+            if (finalText) await pipeline.speak(finalText);
+            if (handsFreeRef.current) {
+              pipeline.setRequireWake(true);
+              await pipeline.start().catch(() => setVoiceState('idle'));
+            }
+          })();
+        },
+      });
+    }
+    return voiceRef.current;
+  }, []);
+
+  const onMic = useCallback(async () => {
+    const pipeline = getVoice();
+    if (voiceState === 'speaking') {
+      await pipeline.stopSpeaking();
+      return;
+    }
+    if (voiceState === 'listening' || voiceState === 'transcribing') {
+      pipeline.stop();
+      return;
+    }
+    try {
+      setVoiceState('preparing');
+      await ensureVoiceReady((label) => setVoiceDetail(label));
+      // A deliberate tap IS the wake signal — the phrase gate only guards
+      // hands-free re-arming.
+      pipeline.setRequireWake(false);
+      await pipeline.start();
+    } catch (err) {
+      setVoiceState('idle');
+      const message = err instanceof Error ? err.message : String(err);
+      setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text: `Voice setup failed: ${message}` }]);
+    }
+  }, [voiceState, getVoice]);
+
+  useEffect(() => () => voiceRef.current?.stop(), []);
+
   // Deferred agency: when a scheduled task comes due the scheduler runs a
   // full agent loop through this same path, so the audience watches it think.
   useEffect(() => {
@@ -482,6 +546,9 @@ export default function ChatScreen({
         onSend={() => void run(input)}
         onStop={stop}
         running={running}
+        voiceState={voiceState}
+        voiceDetail={voiceDetail}
+        onMic={() => void onMic()}
       />
     </KeyboardAvoidingView>
   );
