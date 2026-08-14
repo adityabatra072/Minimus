@@ -1,4 +1,5 @@
 import { RunAnywhere } from '@runanywhere/core';
+import { diag } from './diag';
 import type {
   AdapterEvent,
   ChatMessage,
@@ -110,6 +111,12 @@ export class LocalAdapter implements ModelAdapter {
     // it with its own </think>.
     if (lfm) yield { type: 'delta', text: '<think>' };
     let inThinking = false;
+    // Stream forensics: rig A/B proved the silent turns are runtime-specific,
+    // not prompt-text — so the stream itself must testify. Counts by kind +
+    // how it ended, one syslog line per generation.
+    let thoughtChars = 0;
+    let textChars = 0;
+    let endReason = 'iterator-exhausted';
     let eventCount = 0;
     for await (const event of stream) {
       eventCount += 1;
@@ -124,10 +131,12 @@ export class LocalAdapter implements ModelAdapter {
       switch (event.type) {
         case 'token': {
           if (event.kind === 'thought') {
+            thoughtChars += event.text.length;
             const prefix = inThinking ? '' : '<think>';
             inThinking = true;
             yield { type: 'delta', text: prefix + event.text };
           } else {
+            textChars += event.text.length;
             const prefix = inThinking ? '</think>' : '';
             inThinking = false;
             yield { type: 'delta', text: prefix + event.text };
@@ -135,14 +144,22 @@ export class LocalAdapter implements ModelAdapter {
           break;
         }
         case 'failed':
+          endReason = 'failed';
+          diag(
+            `gen END ${endReason}: events=${eventCount} thought=${thoughtChars}ch text=${textChars}ch`,
+          );
           throw event.error;
         case 'completed':
-          console.log(`[minimus] stream completed after ${eventCount} events`);
+          endReason = 'completed';
           break;
         default:
           break;
       }
     }
+    if (options.signal?.aborted) endReason = 'aborted';
+    diag(
+      `gen END ${endReason}: events=${eventCount} thought=${thoughtChars}ch text=${textChars}ch promptChars=${prompt.length}`,
+    );
     if (inThinking) yield { type: 'delta', text: '</think>' };
     yield { type: 'done' };
   }
