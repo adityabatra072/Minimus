@@ -135,12 +135,16 @@ describe('AgentLoop', () => {
     expect(log).toContain('flashlight:true');
   });
 
-  it('gives up nudging for an answer after one attempt', async () => {
+  it('gives up nudging for an answer after two attempts', async () => {
     const { tools } = makeTools();
-    const adapter = new MockAdapter(['', '']);
+    const adapter = new MockAdapter(['', '', '']);
     const events = await collect(new AgentLoop().run('say something', { adapter, tools }));
     expect(finished(events).reason).toBe('completed');
     expect(finished(events).finalText).toBe('');
+    const nudges = events.filter(
+      (e) => e.type === 'parse_retry' && e.reason === 'empty final answer',
+    );
+    expect(nudges).toHaveLength(2);
   });
 
   it('retries with a nudge on unknown tool, then succeeds', async () => {

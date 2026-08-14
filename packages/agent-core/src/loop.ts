@@ -149,7 +149,11 @@ export class AgentLoop {
     let streakTool = '';
     let streakCount = 0;
     let streakNudged = false;
-    let emptyAnswerNudged = false;
+    let emptyAnswerNudges = 0;
+    // Two chances, not one: on-device the model can emit consecutive silent
+    // turns mid-task (think-then-EOS), and a single nudge left a calendar
+    // booking half-done on a live demo take.
+    const maxEmptyAnswerNudges = 2;
 
     for (let turn = startTurn; turn < policy.maxTurns; turn++) {
       if (config.signal?.aborted) {
@@ -260,8 +264,8 @@ export class AgentLoop {
       if (parsed.calls.length === 0) {
         // A run must never end with a blank bubble: a turn that spent itself
         // thinking (or emitted nothing) gets ONE explicit demand to answer.
-        if (parsed.text.trim() === '' && !emptyAnswerNudged) {
-          emptyAnswerNudged = true;
+        if (parsed.text.trim() === '' && emptyAnswerNudges < maxEmptyAnswerNudges) {
+          emptyAnswerNudges++;
           messages.push({
             role: 'assistant',
             content: '',
