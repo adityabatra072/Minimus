@@ -24,7 +24,16 @@ import type {
 const IM_START = '<|im_start|>';
 const IM_END = '<|im_end|>';
 
-function toChatMl(messages: ChatMessage[]): string {
+/** Render one argument value the way LFM2.5's own template does. */
+function lfmArgValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')}'`;
+  }
+  if (value !== null && typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function toChatMl(messages: ChatMessage[], lfm: boolean): string {
   let out = '';
   const turn = (role: string, content: string) => {
     out += `${IM_START}${role}\n${content}${IM_END}\n`;
@@ -40,21 +49,39 @@ function toChatMl(messages: ChatMessage[]): string {
       case 'assistant': {
         let content = m.content;
         for (const call of m.toolCalls ?? []) {
-          content +=
-            (content ? '\n' : '') +
-            `<tool_call>${JSON.stringify({ name: call.name, arguments: call.arguments })}</tool_call>`;
+          if (lfm) {
+            // LFM2.5's template renders history calls in its own pythonic
+            // wrapper — Hermes-style JSON here is off-distribution.
+            const args = Object.entries(call.arguments)
+              .map(([k, v]) => `${k}=${lfmArgValue(v)}`)
+              .join(', ');
+            content += `<|tool_call_start|>[${call.name}(${args})]<|tool_call_end|>`;
+          } else {
+            content +=
+              (content ? '\n' : '') +
+              `<tool_call>${JSON.stringify({ name: call.name, arguments: call.arguments })}</tool_call>`;
+          }
         }
         turn('assistant', content);
         break;
       }
       case 'tool':
-        // ChatML has no tool role that every model understands — deliver the
-        // result as a user turn with a stable envelope (same as eval rig).
-        turn('user', `<tool_response name="${m.toolName}">\n${m.content}\n</tool_response>`);
+        if (lfm) {
+          // The LFM template renders any role verbatim: tool results are a
+          // plain `tool` turn, not a user-wrapped envelope.
+          turn('tool', m.content);
+        } else {
+          turn('user', `<tool_response name="${m.toolName}">\n${m.content}\n</tool_response>`);
+        }
         break;
     }
   }
-  out += `${IM_START}assistant\n`;
+  // THE line that ended a week of silent-turn hunts: LFM2.5's generation
+  // prompt is `<|im_start|>assistant\n<think>` — thinking FORCED OPEN by the
+  // template. Without the prefill the model is off-distribution and often
+  // emits EOS instead of deliberating; the rig never saw it because
+  // llama-server applies the real template.
+  out += lfm ? `${IM_START}assistant\n<think>` : `${IM_START}assistant\n`;
   return out;
 }
 
@@ -65,7 +92,8 @@ export class LocalAdapter implements ModelAdapter {
     messages: ChatMessage[],
     options: GenerateOptions,
   ): AsyncIterable<AdapterEvent> {
-    const prompt = toChatMl(messages);
+    const lfm = this.modelId.toLowerCase().includes('lfm');
+    const prompt = toChatMl(messages, lfm);
     console.log(`[minimus] generate start model=${this.modelId} promptChars=${prompt.length}`);
     const stream = RunAnywhere.llm.generateStream(prompt, {
       model: this.modelId,
@@ -77,6 +105,10 @@ export class LocalAdapter implements ModelAdapter {
       stopSequences: [IM_END, IM_START, ...(options.stopSequences ?? [])],
     });
 
+    // The prompt pre-opened <think> for LFM — surface the opening tag to the
+    // harness so extractReasoning sees a complete block when the model closes
+    // it with its own </think>.
+    if (lfm) yield { type: 'delta', text: '<think>' };
     let inThinking = false;
     let eventCount = 0;
     for await (const event of stream) {
