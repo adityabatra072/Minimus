@@ -59,14 +59,26 @@ export function Composer({
           <Text style={styles.attachText} numberOfLines={1}>
             🖼 {attachment}
           </Text>
-          <TouchableOpacity onPress={onClearAttachment} hitSlop={8}>
+          <TouchableOpacity
+            onPress={onClearAttachment}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Remove attachment"
+          >
             <Text style={styles.attachClear}>✕</Text>
           </TouchableOpacity>
         </View>
       ) : null}
       <View style={[styles.pill, voiceState === 'listening' && styles.pillListening]}>
         {onAttach ? (
-          <TouchableOpacity style={styles.mic} onPress={onAttach} disabled={running} hitSlop={8}>
+          <TouchableOpacity
+            style={styles.mic}
+            onPress={onAttach}
+            disabled={running}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Attach image"
+          >
             <Text style={styles.attachGlyph}>＋</Text>
           </TouchableOpacity>
         ) : null}
@@ -76,6 +88,8 @@ export function Composer({
             onPress={onMic}
             disabled={running && !voiceBusy}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={voiceBusy ? 'Stop voice input' : 'Start voice input'}
           >
             <View style={[styles.micGlyph, voiceBusy && styles.micGlyphOn]} />
           </TouchableOpacity>
@@ -88,11 +102,18 @@ export function Composer({
           placeholderTextColor={voiceState === 'listening' ? color.amber : color.faint}
           editable={!running && !voiceBusy}
           onSubmitEditing={onSend}
-          returnKeyType="send"
-          multiline={false}
+          returnKeyType="default"
+          blurOnSubmit={false}
+          multiline
         />
         {running ? (
-          <TouchableOpacity style={[styles.action, styles.stop]} onPress={onStop} hitSlop={8}>
+          <TouchableOpacity
+            style={[styles.action, styles.stop]}
+            onPress={onStop}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Stop generating"
+          >
             <View style={styles.stopSquare} />
           </TouchableOpacity>
         ) : (
@@ -101,6 +122,8 @@ export function Composer({
             onPress={onSend}
             disabled={!canSend}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Send message"
           >
             <Text style={[styles.arrow, !canSend && styles.arrowOff]}>↑</Text>
           </TouchableOpacity>
@@ -119,18 +142,24 @@ const styles = StyleSheet.create({
   },
   pill: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     backgroundColor: color.bg1,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: color.line,
     paddingLeft: space(1.5),
     paddingRight: space(1.5),
-    height: 52,
+    minHeight: 52,
     gap: space(1.5),
   },
   pillListening: { borderColor: color.amber },
-  input: { flex: 1, color: color.text, fontSize: 16, paddingVertical: 0 },
+  input: {
+    flex: 1,
+    color: color.text,
+    fontSize: 16,
+    maxHeight: 120,
+    paddingVertical: space(3.5),
+  },
   mic: {
     width: 38,
     height: 38,

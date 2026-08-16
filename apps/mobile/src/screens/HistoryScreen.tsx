@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSessionStore } from '../stores/sessionStore';
 import { color, font, radius, space } from '../theme';
 
@@ -43,7 +43,17 @@ export default function HistoryScreen({
                   {new Date(item.updatedAtMs).toLocaleString()} · {item.messageCount} messages
                 </Text>
               </View>
-              <TouchableOpacity hitSlop={10} onPress={() => deleteSession(item.id)}>
+              <TouchableOpacity
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Delete chat"
+                onPress={() =>
+                  Alert.alert('Delete this chat?', item.title, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete', style: 'destructive', onPress: () => deleteSession(item.id) },
+                  ])
+                }
+              >
                 <Text style={styles.delete}>✕</Text>
               </TouchableOpacity>
             </TouchableOpacity>

@@ -53,6 +53,14 @@ export function extractReasoning(output: string): { text: string; reasoning: str
     reasoning += text.slice(0, dangling).trim() + '\n';
     text = text.slice(dangling + '</think>'.length);
   }
+  // An UNCLOSED `<think>` means generation stopped mid-thought (cancelled, or
+  // the budget ran out). Everything after it is reasoning — never answer text.
+  // Without this a cancelled run rendered a literal "<think>" bubble in chat.
+  const open = text.indexOf('<think>');
+  if (open !== -1) {
+    reasoning += text.slice(open + '<think>'.length).trim() + '\n';
+    text = text.slice(0, open);
+  }
   return { text, reasoning: reasoning.trim() };
 }
 

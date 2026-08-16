@@ -25,11 +25,9 @@
     "react-native-blob-util": "^0.22.2",
     "react-native-device-info": "^14.0.4",
     "react-native-fs": "^2.20.0",
-    "react-native-gesture-handler": "^3.0.2",
     "react-native-image-picker": "^8.2.1",
     "react-native-nitro-modules": "0.33.9",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-screens": "~4.18.0",
     "zustand": "^5.0.13"
   },
   "overrides": {

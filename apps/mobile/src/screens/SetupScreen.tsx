@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RunAnywhere } from '@runanywhere/core';
 import { DEFAULT_MODEL_ID } from '../services/catalog';
+import { color, radius, space } from '../theme';
 
 /**
  * First-run gate: makes sure the default agent model is on-device,
@@ -58,7 +59,7 @@ export default function SetupScreen({ onReady }: { onReady: () => void }): React
   return (
     <View style={styles.root}>
       <Text style={styles.title}>Minimus</Text>
-      {phase === 'checking' && <ActivityIndicator color="#2563eb" size="large" />}
+      {phase === 'checking' && <ActivityIndicator color={color.amber} size="large" />}
       {phase === 'needs_download' && (
         <>
           <Text style={styles.subtitle}>
@@ -71,8 +72,11 @@ export default function SetupScreen({ onReady }: { onReady: () => void }): React
       )}
       {phase === 'downloading' && (
         <>
-          <ActivityIndicator color="#2563eb" size="large" />
+          <ActivityIndicator color={color.amber} size="large" />
           <Text style={styles.subtitle}>Downloading… {percent}%</Text>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${percent}%` }]} />
+          </View>
         </>
       )}
       {phase === 'error' && (
@@ -88,10 +92,30 @@ export default function SetupScreen({ onReady }: { onReady: () => void }): React
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0e0e12', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
-  title: { color: 'white', fontSize: 24, fontWeight: '700' },
-  subtitle: { color: '#aaa', fontSize: 14, textAlign: 'center' },
-  error: { color: '#f87171', fontSize: 13, textAlign: 'center' },
-  btn: { backgroundColor: '#2563eb', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },
-  btnText: { color: 'white', fontWeight: '600' },
+  root: {
+    flex: 1,
+    backgroundColor: color.bg0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: space(6),
+    gap: space(4),
+  },
+  title: { color: color.text, fontSize: 24, fontWeight: '800' },
+  subtitle: { color: color.dim, fontSize: 14, textAlign: 'center' },
+  error: { color: color.danger, fontSize: 13, textAlign: 'center' },
+  btn: {
+    backgroundColor: color.amber,
+    borderRadius: radius.chip,
+    paddingHorizontal: space(6),
+    paddingVertical: space(3),
+  },
+  btnText: { color: color.bg0, fontWeight: '700' },
+  progressTrack: {
+    width: '100%',
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: color.bg2,
+    overflow: 'hidden',
+  },
+  progressFill: { height: 3, backgroundColor: color.amber },
 });

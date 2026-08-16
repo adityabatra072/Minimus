@@ -17,6 +17,7 @@ import { scheduler } from './src/services/scheduler';
 import { runAgentHeadless } from './src/services/headlessAgent';
 import { syncToolPlatform } from './src/services/toolPlatform';
 import { getToolRegistry } from './src/tools';
+import { color, radius, space } from './src/theme';
 
 type AppState = 'initializing' | 'setup' | 'ready' | 'error';
 type Overlay = 'none' | 'models' | 'rehearsal' | 'settings' | 'history' | 'tools';
@@ -62,11 +63,11 @@ export default function App(): React.JSX.Element {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#0e0e12" />
+      <StatusBar barStyle="light-content" backgroundColor={color.bg0} />
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         {state === 'initializing' && (
           <View style={styles.center}>
-            <ActivityIndicator color="#2563eb" size="large" />
+            <ActivityIndicator color={color.amber} size="large" />
             <Text style={styles.dim}>Starting on-device AI…</Text>
           </View>
         )}
@@ -114,10 +115,15 @@ export default function App(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0e0e12' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
-  dim: { color: '#888' },
-  error: { color: '#f87171', textAlign: 'center' },
-  btn: { backgroundColor: '#2563eb', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12 },
-  btnText: { color: 'white', fontWeight: '600' },
+  root: { flex: 1, backgroundColor: color.bg0 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space(3), padding: space(6) },
+  dim: { color: color.dim },
+  error: { color: color.danger, textAlign: 'center' },
+  btn: {
+    backgroundColor: color.amber,
+    borderRadius: radius.chip,
+    paddingHorizontal: space(6),
+    paddingVertical: space(3),
+  },
+  btnText: { color: color.bg0, fontWeight: '700' },
 });

@@ -183,6 +183,12 @@ export class AgentLoop {
             yield { type: 'text_delta', text: ev.text };
           }
         }
+        // Adapters end the stream cleanly on abort (no throw), so a cancelled
+        // run reached the parser with half a turn and reported "completed".
+        if (config.signal?.aborted) {
+          yield { type: 'run_finished', reason: 'cancelled', finalText };
+          return;
+        }
       } catch (err) {
         if (config.signal?.aborted) {
           yield { type: 'run_finished', reason: 'cancelled', finalText };
@@ -380,6 +386,11 @@ export class AgentLoop {
           });
           // No tool_call_finished here: nothing executed, and painting a
           // second op on the UI rail makes the agent look like it stutters.
+          // Also force the next turn into answer mode: a model that repeats a
+          // call has stopped making progress, and its "let me reconsider" turn
+          // is the most expensive thing in the run (20-60s of thinking on a
+          // phone) for information it already has.
+          suppressThinkingNextTurn = true;
           yield { type: 'duplicate_call_suppressed', call };
           continue;
         }

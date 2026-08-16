@@ -62,6 +62,9 @@ export default function ToolsScreen({ onClose }: { onClose: () => void }): React
         </Text>
 
         <Text style={styles.sectionLabel}>mcp servers</Text>
+        {mcpServers.length === 0 ? (
+          <Text style={styles.rowHint}>No MCP servers added yet.</Text>
+        ) : null}
         {mcpServers.map((s) => {
           const status = mcpStatus.get(s.name);
           return (
@@ -79,7 +82,12 @@ export default function ToolsScreen({ onClose }: { onClose: () => void }): React
                     : 'not connected yet'}
                 </Text>
               </View>
-              <TouchableOpacity hitSlop={10} onPress={() => removeMcpServer(s.name)}>
+              <TouchableOpacity
+                hitSlop={10}
+                onPress={() => removeMcpServer(s.name)}
+                accessibilityRole="button"
+                accessibilityLabel="Delete MCP server"
+              >
                 <Text style={styles.delete}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -108,6 +116,7 @@ export default function ToolsScreen({ onClose }: { onClose: () => void }): React
         )}
 
         <Text style={styles.sectionLabel}>custom tools</Text>
+        {custom.length === 0 ? <Text style={styles.rowHint}>No custom tools yet.</Text> : null}
         {custom.map((t) => (
           <View key={t.name} style={styles.row}>
             <View style={styles.rowMain}>
@@ -122,6 +131,8 @@ export default function ToolsScreen({ onClose }: { onClose: () => void }): React
                 removeCustom(t.name);
                 resync();
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Delete custom tool"
             >
               <Text style={styles.delete}>✕</Text>
             </TouchableOpacity>
@@ -228,6 +239,7 @@ function CustomForm({
             key={m}
             style={[styles.methodBtn, method === m && styles.methodBtnOn]}
             onPress={() => setMethod(m)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Text style={[styles.methodText, method === m && styles.methodTextOn]}>{m}</Text>
           </TouchableOpacity>

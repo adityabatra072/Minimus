@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   StyleSheet,
   Text,
@@ -190,7 +191,12 @@ export default function ModelsScreen({ onClose }: { onClose: () => void }): Reac
                 </Text>
               </View>
               {item.progress !== undefined ? (
-                <Text style={styles.progress}>{item.progress}%</Text>
+                <View style={styles.progressWrap}>
+                  <Text style={styles.progress}>{item.progress}%</Text>
+                  <View style={styles.progressTrack}>
+                    <View style={[styles.progressFill, { width: `${item.progress}%` }]} />
+                  </View>
+                </View>
               ) : item.downloaded ? (
                 item.id === activeModelId ? (
                   <View style={[styles.btn, styles.btnActive]}>
@@ -198,16 +204,39 @@ export default function ModelsScreen({ onClose }: { onClose: () => void }): Reac
                   </View>
                 ) : (
                   <View style={styles.btnRow}>
-                    <TouchableOpacity style={styles.btn} onPress={() => setActiveModel(item.id)}>
+                    <TouchableOpacity
+                      style={styles.btn}
+                      onPress={() => setActiveModel(item.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Use model"
+                    >
                       <Text style={styles.btnText}>use</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.btn} onPress={() => void remove(item.id)}>
+                    <TouchableOpacity
+                      style={styles.btn}
+                      onPress={() =>
+                        Alert.alert('Delete this model?', item.name, [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: () => void remove(item.id) },
+                        ])
+                      }
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete model"
+                    >
                       <Text style={styles.btnDangerText}>delete</Text>
                     </TouchableOpacity>
                   </View>
                 )
               ) : (
-                <TouchableOpacity style={[styles.btn, styles.btnAmber]} onPress={() => void download(item.id)}>
+                <TouchableOpacity
+                  style={[styles.btn, styles.btnAmber]}
+                  onPress={() => void download(item.id)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Download model"
+                >
                   <Text style={styles.btnAmberText}>get</Text>
                 </TouchableOpacity>
               )}
@@ -304,7 +333,16 @@ const styles = StyleSheet.create({
   rowText: { flex: 1 },
   name: { color: color.text, fontSize: 14, fontWeight: '600' },
   meta: { color: color.dim, fontSize: 12, marginTop: 2 },
-  progress: { color: color.cyan, fontFamily: font.mono, fontSize: 13 },
+  progressWrap: { width: 72, gap: space(1) },
+  progress: { color: color.cyan, fontFamily: font.mono, fontSize: 13, textAlign: 'right' },
+  progressTrack: {
+    width: '100%',
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: color.bg2,
+    overflow: 'hidden',
+  },
+  progressFill: { height: 3, backgroundColor: color.amber },
   btnRow: { flexDirection: 'row', gap: space(2) },
   btn: {
     paddingHorizontal: space(3),

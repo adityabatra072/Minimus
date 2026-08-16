@@ -15,6 +15,7 @@ import {
   teachingToolExclusions,
 } from '../services/intent';
 import { verbFor } from '../services/humanize';
+import { runSelfTests, type CheckResult } from '../services/selfTest';
 import { color, font, radius, space } from '../theme';
 import { LiveDot } from '../components/LiveDot';
 
@@ -130,8 +131,26 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
   const [results, setResults] = useState<Record<string, BeatResult>>({});
   const [busy, setBusy] = useState(false);
   const [includeFocus, setIncludeFocus] = useState(false);
+  const [checks, setChecks] = useState<CheckResult[]>([]);
+  const [checking, setChecking] = useState(false);
   const cancelled = useRef(false);
   const inFlight = useRef(false);
+
+  // Deterministic checks first: they catch broken schemas, storage, routing and
+  // native bridges in under a second, so a red beat later is about the MODEL
+  // rather than about plumbing.
+  const runChecks = useCallback(async (): Promise<CheckResult[]> => {
+    setChecking(true);
+    setChecks([]);
+    const collected: CheckResult[] = [];
+    const results = await runSelfTests((r) => {
+      collected.push(r);
+      setChecks([...collected]);
+      diag(`CHECK ${r.ok ? '✅' : '❌'} ${r.name}: ${r.detail}`);
+    });
+    setChecking(false);
+    return results;
+  }, []);
 
   const runBeat = useCallback(
     async (beat: Beat): Promise<boolean> => {
@@ -259,6 +278,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
   const runAll = useCallback(async () => {
     setBusy(true);
     cancelled.current = false;
+    await runChecks();
     const beats = BEATS.filter((b) => includeFocus || !b.stealsFocus);
     diag(`REHEARSAL === start: ${beats.length} beats, model=${activeModelId} ===`);
     const startedAll = Date.now();
@@ -273,7 +293,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       )}s ===`,
     );
     setBusy(false);
-  }, [includeFocus, runBeat, activeModelId]);
+  }, [includeFocus, runBeat, activeModelId, runChecks]);
 
   const passCount = Object.values(results).filter((r) => r.status === 'pass').length;
   const failCount = Object.values(results).filter((r) => r.status === 'fail').length;
@@ -287,6 +307,9 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       `model: ${activeModelId}`,
       `time: ${new Date().toISOString()}`,
       `tally: ${passCount} passed · ${failCount} failed`,
+      '',
+      `system checks: ${checks.filter((c) => c.ok).length}/${checks.length} passed`,
+      ...checks.map((c) => `${c.ok ? '✅' : '❌'} ${c.name}: ${c.detail}`),
       '',
     ];
     for (const beat of BEATS) {
@@ -306,7 +329,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       lines.push('');
     }
     await Share.share({ message: lines.join('\n') }).catch(() => undefined);
-  }, [results, activeModelId, passCount, failCount]);
+  }, [results, activeModelId, passCount, failCount, checks]);
 
   return (
     <View style={styles.root}>
@@ -328,6 +351,15 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           onPress={() => (busy ? (cancelled.current = true) : void runAll())}
         >
           <Text style={styles.runBtnText}>{busy ? 'Stop' : 'Run all beats'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.toggle}
+          onPress={() => void runChecks()}
+          disabled={busy || checking}
+          accessibilityRole="button"
+          accessibilityLabel="Run system checks"
+        >
+          <Text style={styles.toggleText}>{checking ? 'checking…' : 'system checks'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.toggle, includeFocus && styles.toggleOn]}
@@ -355,6 +387,29 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
         data={BEATS}
         keyExtractor={(b) => b.id}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          checks.length > 0 ? (
+            <View style={styles.checksBlock}>
+              <Text style={styles.checksLabel}>
+                system checks · {checks.filter((c) => c.ok).length}/{checks.length}
+              </Text>
+              {checks.map((c) => (
+                <View key={c.name} style={styles.checkRow}>
+                  <Text style={styles.statusGlyph}>{c.ok ? '✅' : '❌'}</Text>
+                  <View style={styles.checkMain}>
+                    <Text style={styles.checkName}>{c.name}</Text>
+                    <Text
+                      style={[styles.checkDetail, !c.ok && styles.detailFail]}
+                      numberOfLines={2}
+                    >
+                      {c.detail}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null
+        }
         renderItem={({ item }) => {
           const r = results[item.id];
           return (
@@ -452,6 +507,20 @@ const styles = StyleSheet.create({
   },
   shareBtn: { color: color.cyan, fontFamily: font.mono, fontSize: 12 },
   list: { padding: space(4), gap: space(2) },
+  checksBlock: {
+    backgroundColor: color.bg1,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: color.line,
+    padding: space(3),
+    gap: space(2),
+    marginBottom: space(2),
+  },
+  checksLabel: { color: color.amber, fontSize: 11, fontFamily: font.mono, letterSpacing: 1 },
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space(2) },
+  checkMain: { flex: 1, gap: space(1) },
+  checkName: { color: color.text, fontSize: 13, fontWeight: '600' },
+  checkDetail: { color: color.dim, fontSize: 11, fontFamily: font.mono, lineHeight: 15 },
   row: {
     backgroundColor: color.bg1,
     borderRadius: radius.card,

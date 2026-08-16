@@ -558,7 +558,9 @@ export default function ChatScreen({
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      // Android needs 'height' here: with undefined the composer sits under the
+      // keyboard whenever windowSoftInputMode is adjustResize.
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <Header
         onOpenModels={onOpenModels}
@@ -658,11 +660,23 @@ function Header({
           <Text style={styles.statusText}>{usingRemote ? 'cloud' : 'on-device'}</Text>
         </View>
         {onNewChat ? (
-          <TouchableOpacity style={styles.bubbleBtn} onPress={onNewChat} hitSlop={8}>
+          <TouchableOpacity
+            style={styles.bubbleBtn}
+            onPress={onNewChat}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="New chat"
+          >
             <Text style={styles.headerGlyph}>＋</Text>
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity style={styles.bubbleBtn} onPress={() => setMenuOpen(true)} hitSlop={8}>
+        <TouchableOpacity
+          style={styles.bubbleBtn}
+          onPress={() => setMenuOpen(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="More options"
+        >
           <Text style={styles.headerGlyph}>⋯</Text>
         </TouchableOpacity>
       </View>
@@ -806,10 +820,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bubbleBtnOn: { borderColor: color.amberDeep },
-  bubbleGlyph: { width: 10, height: 10, borderRadius: 5, backgroundColor: color.faint },
-  bubbleGlyphOn: { backgroundColor: color.amber },
-  rehearseGlyph: { color: color.faint, fontSize: 14, fontWeight: '700' },
   headerGlyph: { color: color.faint, fontSize: 15, fontWeight: '600' },
   statusPill: {
     flexDirection: 'row',
