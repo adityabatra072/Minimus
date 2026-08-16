@@ -22,6 +22,21 @@ react {
     codegenDir = resolvePackageDir("@react-native/codegen")
     cliFile = new File(resolvePackageDir("react-native"), "cli.js")
 
+    // React Native 0.85 ships hermesc in its own `hermes-compiler` package,
+    // but the Gradle plugin still looks for it under
+    // react-native/sdks/hermesc/%OS-BIN%/ and fails release bundling with
+    // "Couldn't determine Hermesc location". Point it at the real binary when
+    // that package is present; leave the plugin's default alone otherwise.
+    def hermesBinName = System.getProperty("os.name").toLowerCase().contains("windows")
+            ? "win64-bin/hermesc.exe"
+            : (System.getProperty("os.name").toLowerCase().contains("mac")
+                    ? "osx-bin/hermesc"
+                    : "linux64-bin/hermesc")
+    def hermesFromPackage = new File(resolvePackageDir("hermes-compiler"), "hermesc/${hermesBinName}")
+    if (hermesFromPackage.exists()) {
+        hermesCommand = hermesFromPackage.absolutePath
+    }
+
     /* Variants */
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. Default is "debug", "debugOptimized".

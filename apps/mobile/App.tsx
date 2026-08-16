@@ -15,6 +15,7 @@ import { useSessionStore } from './src/stores/sessionStore';
 import { useToolStore } from './src/stores/toolStore';
 import { scheduler } from './src/services/scheduler';
 import { runAgentHeadless } from './src/services/headlessAgent';
+import { ensureAndroidPermissions } from './src/services/permissions';
 import { syncToolPlatform } from './src/services/toolPlatform';
 import { getToolRegistry } from './src/tools';
 import { color, radius, space } from './src/theme';
@@ -56,6 +57,7 @@ export default function App(): React.JSX.Element {
   // chat screen swaps in a richer runner while it's mounted.
   useEffect(() => {
     if (state !== 'ready') return;
+    void ensureAndroidPermissions();
     scheduler.setRunner(runAgentHeadless);
     scheduler.start();
     void scheduler.tick();

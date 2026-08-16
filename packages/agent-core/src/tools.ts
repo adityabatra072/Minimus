@@ -72,10 +72,17 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
+  /**
+   * Tools for the requested groups. No group is implicit: 'core' used to ride
+   * along on every request, which put the memory and macro schemas (with their
+   * usage hints) into a "turn on the flashlight" prompt — 43% of that prompt,
+   * re-prefilled every turn, for tools the request cannot use. Callers route
+   * 'core' deliberately when a request is actually about memory or macros.
+   */
   list(groups?: string[]): ToolDefinition[] {
     const all = [...this.tools.values()];
     if (!groups || groups.length === 0) return all;
-    const wanted = new Set(['core', ...groups]);
+    const wanted = new Set(groups);
     return all.filter((t) => wanted.has(t.group ?? 'core'));
   }
 
