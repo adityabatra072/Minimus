@@ -366,8 +366,11 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           onPress={() => setIncludeFocus((v) => !v)}
           disabled={busy}
         >
-          <Text style={[styles.toggleText, includeFocus && styles.toggleTextOn]}>
-            include app-switching beats
+          <Text
+            style={[styles.toggleText, includeFocus && styles.toggleTextOn]}
+            numberOfLines={1}
+          >
+            app-switching
           </Text>
         </TouchableOpacity>
       </View>

@@ -63,16 +63,56 @@ are USER_DEFINED and do render.)
 - Suggested fix: an option to render special tokens in the stream, or emit
   tool-call segments as typed stream events.
 
-## 5. context_size hard-capped to 2048 when the memory fit check fails
+## 5. `contextLength` never reaches the llama.cpp backend, so every model
+loads at the 2048 default cap
 
-**Impact: medium-high.** In `llamacpp_backend.cpp`, when `common_fit_params`
-fails or errors, a user-requested context is capped straight to 2048 — even
-when an intermediate value (3072, 4096) would fit. On a phone this halves the
-generation budget of every deliberation-heavy turn.
+**Impact: critical (quality and latency).** Confirmed on device, OnePlus 9R,
+release build:
 
-- Suggested fix: on fit failure, retry at intermediate sizes instead of
-  falling to the floor; log the final effective n_ctx at INFO so apps can see
-  what they actually got, and surface it through the load result.
+```
+LLM.LlamaCpp: Final context size: 2048 (fitted=4096, train=128000, cap=2048)
+```
+
+The device fits 4096 and the model trains at 128k, but the context is 2048.
+Two defects combine:
+
+1. **Key mismatch.** `model_lifecycle_translation.cpp::load_options_json()`
+   emits `"context_length"` (from `ModelLoadRequest.context_length`), while
+   `llamacpp_backend.cpp::load_model()` reads `"context_size"`. Nothing on the
+   v4 load path ever writes `context_size`, so `models.load(id, {
+   contextLength })` is silently discarded and `user_context_size` stays 0.
+2. **The cap can only lower, never raise.** `context_size_ = std::min({fitted,
+   train, max_default_context_})` with `max_default_context_` defaulting to
+   2048, so even an honoured request above 2048 would be clamped back down.
+
+Consequence for an agent app: with a ~1200-token system prompt, deliberation
+plus the answer had roughly 800 tokens. That is exactly where the thinking
+overruns and mid-call truncations came from.
+
+- Fix (staged in this clone, not yet built): also read `"context_length"`, and
+  raise `max_default_context_` when the caller explicitly asks for more.
+- Not shipped in the app because the RN packages consume prebuilt native
+  artifacts: Android would need `librac_backend_llamacpp.so` rebuilt, iOS
+  needs the xcframework rebuilt on macOS. Shipping the two platforms on
+  different engines was the worse option.
+
+## 5b. Android native build script is not usable on Windows
+
+Reproduced while trying to build the fix above with NDK 27.1 and CMake 3.30.5
+installed:
+
+- `scripts/build/build-core-android.sh` maps `uname` to an NDK host tag and
+  handles only Darwin and Linux; Git Bash reports `MINGW64_NT-*` and the
+  script exits. (Same root cause as finding 7.)
+- It then requires `python3`, which does not exist on a standard Windows
+  Python install (the binary is `python`).
+- With those worked around, the NDK toolchain file's `-ffile-prefix-map`
+  arguments get mangled by MSYS path conversion, and clang++ fails to
+  configure.
+
+Suggested fix: accept `MINGW*|MSYS*|CYGWIN*` as `windows-x86_64`, probe for
+`python3` then `python`, and set `MSYS2_ARG_CONV_EXCL` around the CMake
+invocation.
 
 ## 6. LoadOptions.contextLength was rejected by the RN load path
 
@@ -103,6 +143,23 @@ Windows requires patching to `windows-x86_64` (done via postinstall script
 **Impact: low-medium.** Runtime DLLs are not staged next to the executable
 (manual copy needed), and path handling breaks on backslashes in some
 subcommands. Details in the app repo's early setup notes.
+
+## 9b. React Native 0.85 release builds cannot find hermesc
+
+`createBundleReleaseJsAndAssets` fails with "Couldn't determine Hermesc
+location ... react-native/sdks/hermesc/%OS-BIN%/hermesc". RN 0.85 ships the
+compiler in a separate `hermes-compiler` package
+(`hermesc/win64-bin/hermesc.exe`), but the Gradle plugin still looks under
+`react-native/sdks`. Worked around in this app by setting `hermesCommand` in
+the `react { }` block. Affects every platform, not just Windows.
+
+## 9c. Unused RN dependencies break Windows release builds via MAX_PATH
+
+`react-native-gesture-handler` codegen produces object paths longer than 260
+characters under `.cxx/RelWithDebInfo/...` (the debug path is short enough to
+pass, so this only appears in release builds). Not an SDK bug, but worth
+knowing for anyone building this stack on Windows: remove unused RN packages
+or enable long paths.
 
 ## 10. Microphone capture is not on the public RN API
 
