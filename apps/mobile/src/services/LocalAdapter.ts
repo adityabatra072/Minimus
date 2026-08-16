@@ -87,8 +87,12 @@ function toChatMl(messages: ChatMessage[], lfm: boolean, suppressThinking: boole
   // the block instead: the model starts directly in answer mode and cannot
   // re-spiral.
   if (lfm) {
+    // An EMPTY <think></think> reads as off-distribution and the model stops
+    // dead (observed: events=4, 15 characters, no answer). A short CLOSED
+    // thought reads as deliberation that already finished, so generation
+    // continues straight into the answer — which is the point of suppressing.
     out += suppressThinking
-      ? `${IM_START}assistant\n<think></think>`
+      ? `${IM_START}assistant\n<think>I have everything I need. I will answer now.</think>`
       : `${IM_START}assistant\n<think>`;
   } else {
     out += `${IM_START}assistant\n`;

@@ -14,7 +14,9 @@ import { diag } from './diag';
  */
 export async function ensureAndroidPermissions(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  const wanted: string[] = [
+  const wanted: (keyof typeof PermissionsAndroid.PERMISSIONS extends never
+    ? string
+    : Parameters<typeof PermissionsAndroid.requestMultiple>[0][number])[] = [
     PermissionsAndroid.PERMISSIONS.READ_CALENDAR,
     PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR,
   ];
