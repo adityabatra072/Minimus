@@ -62,3 +62,7 @@ The built-in catalog targets phones with around 6GB of RAM: LiquidAI LFM2.5-2.6B
 ## Design notes
 
 The harness assumes small models fail in specific ways and engineers around them: tools the model chronically misroutes are hidden when intent detection says they cannot be right; usage hints render inline under each tool; oversized tool outputs are truncated before they starve the context; a turn that produces nothing gets one explicit nudge to continue; a tool call cut off by the generation window is retried with a fresh one. The eval suite mirrors the app's exact prompt composition, because an eval that tests a nicer prompt than the one that ships measures nothing.
+
+## License
+
+Apache 2.0. See `LICENSE`. The RunAnywhere SDKs this app depends on carry their own license.
