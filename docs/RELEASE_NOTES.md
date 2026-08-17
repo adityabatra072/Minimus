@@ -94,7 +94,12 @@ reading the code:
   run, woke itself minutes later, compared against what it had recorded, and
   reported
 - Agent beats run on both platforms from the in-app Rehearsal screen, with a
-  shareable report
+  shareable report. Teaching a phrase was the last beat to go green, and it
+  took the same fix the rest of the harness is built on: while the user is
+  teaching, `run_macro` and `remember` are hidden, because a model that cannot
+  see the wrong tool cannot pick it. Persuasion in the prompt capped out at
+  roughly two runs in three; hiding the tool is 3/3 on the rig and 2/2 on
+  device
 - Release builds work on Windows for Android and via GitHub Actions for iOS
 
 Known open item: the synthetic voice round trip (text to speech, then speech
@@ -112,6 +117,10 @@ sideloading tool, or open `apps/mobile/ios` in Xcode.
 
 First launch downloads the default model (about 1.7 GB). Voice and vision
 models download on first use of those features.
+
+## License
+
+Apache 2.0. The RunAnywhere SDKs this app depends on carry their own license.
 
 ## Known limits
 
