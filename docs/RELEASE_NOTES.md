@@ -53,15 +53,54 @@ Every model load currently gets a 2048-token context regardless of what the app
 requests, because of an SDK-level key mismatch documented in
 `docs/SDK-FINDINGS.md`. The harness is tuned to work inside that budget.
 
+## Found and fixed during the QA pass
+
+Every one of these was found by operating the app on real hardware, not by
+reading the code:
+
+- Android never requested runtime permissions, so calendar and notification
+  tools failed permanently on Android 13+ with no prompt to explain why
+- Connecting to a self-hosted MCP server or local model endpoint was
+  impossible on Android release builds: cleartext HTTP to loopback and LAN
+  addresses is blocked by default, and it surfaced only as "Network request
+  failed"
+- With the keyboard open, the composer was pushed off screen on Android
+- The app opened an empty chat on every launch instead of the conversation you
+  were last in
+- Cancelling a run rendered a literal "<think>" bubble and reported the run as
+  completed
+- A run whose tool calls all succeeded was reported as an error when its
+  closing sentence ran out of context
+- Every prompt carried the memory and macro tools regardless of the request:
+  53% of a "turn on the flashlight" prompt, re-processed on every turn
+- Thinking overruns retried in the same space that had just overflowed
+- Concatenated tool calls from one reply parsed as zero calls, so batched
+  work silently became prose
+
 ## Verified in this release
 
 - 9 deterministic system checks pass on both platforms (tool schemas, prompt
   budget, intent routing, tool-call parsing, schedule parsing, native bridges,
   storage, stores, live calendar)
+- 14 deep feature checks run against the real subsystems on both platforms:
+  device tools, memory, macros, scheduled tasks, approval gating, session and
+  settings persistence, notifications and timers, a calendar write read back,
+  web search, custom tools, MCP, vision, and a voice round trip
+- MCP proven end to end on hardware: a server added by URL in the Tools
+  screen, its tools discovered, the agent choosing one, the run pausing for
+  approval, the call reaching the server, and the result coming back as an
+  answer
+- Deferred agency proven on both platforms: the app scheduled a future agent
+  run, woke itself minutes later, compared against what it had recorded, and
+  reported
 - Agent beats run on both platforms from the in-app Rehearsal screen, with a
   shareable report
-- Android runtime permissions are requested properly (calendar, notifications)
 - Release builds work on Windows for Android and via GitHub Actions for iOS
+
+Known open item: the synthetic voice round trip (text to speech, then speech
+to text) does not yet transcribe cleanly; the live microphone path is
+unaffected, and the check now reports the audio format it received so the
+mismatch can be pinned down.
 
 ## Install
 
