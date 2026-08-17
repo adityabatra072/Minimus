@@ -29,6 +29,12 @@ function toolLine(tool: ToolDefinition): string {
 export interface PromptOptions {
   format: WireFormat;
   oneToolPerTurn: boolean;
+  /**
+   * Drop the per-tool usage hints. They earn their tokens on a first attempt
+   * (they are what keeps a small model from misrouting), but on a retry after
+   * a thinking overrun the budget is worth more than the guidance.
+   */
+  omitHints?: boolean;
   /** Extra persona/context lines from the app (device, user name, date). */
   preamble?: string;
   /** Injected as "Current date/time" — defaults to now. Pass a fixed value in tests. */
@@ -49,7 +55,14 @@ export function buildSystemPrompt(tools: ToolDefinition[], opts: PromptOptions):
   lines.push(`Current date/time: ${local}.`);
   lines.push('');
   lines.push('## Tools');
-  for (const t of tools) lines.push(toolLine(t));
+  for (const t of tools) {
+    if (opts.omitHints) {
+      const { usageHint: _dropped, ...withoutHint } = t;
+      lines.push(toolLine(withoutHint));
+    } else {
+      lines.push(toolLine(t));
+    }
+  }
   lines.push('');
   lines.push('## Rules');
   if (opts.format === 'hermes') {

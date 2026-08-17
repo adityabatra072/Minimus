@@ -153,6 +153,7 @@ export class AgentLoop {
     let suppressThinkingNextTurn = false;
     /** Side effects that actually landed — the run's real output. */
     let toolsSucceeded = 0;
+    let hintsDropped = false;
     // Two chances, not one: on-device the model can emit consecutive silent
     // turns mid-task (think-then-EOS), and a single nudge left a calendar
     // booking half-done on a live demo take.
@@ -273,11 +274,26 @@ export class AgentLoop {
         });
         // An overrun means prompt + thinking exceeded the context window, so
         // asking again in the same space just repeats it (observed on device:
-        // 3684 characters of thinking, then 59, then nothing). Free real room
-        // by eliding the oldest tool results — the model keeps the recent
-        // turns it actually needs.
+        // 3684 characters of thinking, then 59, then nothing). Free real room.
+        // Older tool results go first; when there are none (a first-turn
+        // overrun, e.g. teaching a phrase), drop the per-tool usage hints
+        // instead — they are worth their tokens on attempt one, not on a
+        // retry that has no room to think.
         const elided = compact(messages, 4);
-        if (elided > 0) yield { type: 'compaction', droppedMessages: elided };
+        if (elided > 0) {
+          yield { type: 'compaction', droppedMessages: elided };
+        } else if (!hintsDropped) {
+          hintsDropped = true;
+          messages[0] = {
+            role: 'system',
+            content: buildSystemPrompt(exposedTools, {
+              format: policy.format,
+              oneToolPerTurn: policy.oneToolPerTurn,
+              omitHints: true,
+              ...(config.preamble !== undefined ? { preamble: config.preamble } : {}),
+            }),
+          };
+        }
         suppressThinkingNextTurn = true;
         yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: 'thinking overrun' };
         yield { type: 'turn_finished', turn };
