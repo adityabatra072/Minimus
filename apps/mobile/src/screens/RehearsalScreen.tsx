@@ -16,6 +16,7 @@ import {
 } from '../services/intent';
 import { verbFor } from '../services/humanize';
 import { runSelfTests, type CheckResult } from '../services/selfTest';
+import { runDeepChecks } from '../services/deepTest';
 import { color, font, radius, space } from '../theme';
 import { LiveDot } from '../components/LiveDot';
 
@@ -147,6 +148,22 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       collected.push(r);
       setChecks([...collected]);
       diag(`CHECK ${r.ok ? '✅' : '❌'} ${r.name}: ${r.detail}`);
+    });
+    setChecking(false);
+    return results;
+  }, []);
+
+  // Deep checks exercise every feature the demo beats never touch: voice
+  // (a TTS to STT round trip, no microphone required), MCP, custom tools,
+  // vision, notifications, calendar writes, web search, and the storage
+  // round trips for memories, macros, scheduled tasks, sessions and settings.
+  const runDeep = useCallback(async (): Promise<CheckResult[]> => {
+    setChecking(true);
+    const collected: CheckResult[] = [];
+    const results = await runDeepChecks((r) => {
+      collected.push(r);
+      setChecks((prev) => [...prev.filter((p) => p.name !== r.name), r]);
+      diag(`DEEP ${r.ok ? '✅' : '❌'} ${r.name}: ${r.detail}`);
     });
     setChecking(false);
     return results;
@@ -359,7 +376,20 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           accessibilityRole="button"
           accessibilityLabel="Run system checks"
         >
-          <Text style={styles.toggleText}>{checking ? 'checking…' : 'system checks'}</Text>
+          <Text style={styles.toggleText} numberOfLines={1}>
+            {checking ? 'checking…' : 'checks'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.toggle}
+          onPress={() => void runDeep()}
+          disabled={busy || checking}
+          accessibilityRole="button"
+          accessibilityLabel="Run deep feature checks"
+        >
+          <Text style={styles.toggleText} numberOfLines={1}>
+            deep
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.toggle, includeFocus && styles.toggleOn]}
