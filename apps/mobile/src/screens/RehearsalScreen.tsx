@@ -7,6 +7,7 @@ import { useModelStore } from '../stores/modelStore';
 import { loadMacros } from '../tools/macroTools';
 import { diag } from '../services/diag';
 import { composeRun } from '../services/intent';
+import { acquireRun, releaseRun } from '../services/runLock';
 import { verbFor } from '../services/humanize';
 import { runSelfTests, type CheckResult } from '../services/selfTest';
 import { runDeepChecks } from '../services/deepTest';
@@ -29,7 +30,6 @@ interface Beat {
   utterance: string;
   /** Tool that must be called for the beat to count as working. */
   expectTool: string;
-  /** Tool groups exposed for this beat — mirrors packages/eval/suites/demos.yaml. */
   /** Beats that yank focus to another app — opt in explicitly. */
   stealsFocus?: boolean;
   note?: string;
@@ -157,15 +157,16 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
     async (beat: Beat): Promise<boolean> => {
       // The phone decodes one generation at a time — a second tap while a beat
       // is running queues a starved run that fails as "got no tools".
-      if (inFlight.current) return false;
+      // inFlight guards double taps on this screen; acquireRun guards the
+      // device — a scheduled task coming due must not generate on top of a
+      // beat (services/runLock).
+      if (inFlight.current || !acquireRun()) return false;
       inFlight.current = true;
       const started = Date.now();
       setResults((r) => ({ ...r, [beat.id]: { status: 'running' } }));
       diag(`REHEARSAL ▶ ${beat.id}: ${JSON.stringify(beat.utterance.slice(0, 80))}`);
 
       const macros = await loadMacros().catch(() => []);
-      // Mirrors ChatScreen's preamble composition exactly — rehearsal must
-      // test the same prompt the audience-facing screen will send.
       // The SHIPPING composition, same as the chat screen and the scheduled
       // runner (agent-core/routing.ts). Beats used to carry a hand-written
       // toolGroups list, which meant a green rehearsal could not tell you
@@ -206,6 +207,14 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           if (ev.type === 'tool_call_started') {
             toolsCalled.push(ev.call.name);
             diag(`REHEARSAL   · ${verbFor(ev.call)}`);
+            // The humanized verb hides the arguments, and for schedule_task
+            // the argument IS the behaviour: "+3" and "+3s" both satisfy a
+            // check for "3" while meaning three minutes and three seconds.
+            // Watched a scheduled task fire 1.5s after being armed with no
+            // way to tell which had been asked for.
+            if (ev.call.name === 'schedule_task') {
+              diag(`REHEARSAL   · when=${JSON.stringify(ev.call.arguments['when'])}`);
+            }
           }
           if (ev.type === 'tool_call_finished' && ev.isError) {
             failure = `${ev.call.name}: ${ev.result.slice(0, 120)}`;
@@ -219,6 +228,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
         failure = err instanceof Error ? err.message : String(err);
       } finally {
         inFlight.current = false;
+        releaseRun();
       }
 
       const seconds = Math.round((Date.now() - started) / 100) / 10;

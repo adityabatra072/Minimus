@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules } from 'react-native';
+import { isRunBusy } from './runLock';
 
 /**
  * Deferred agency: the agent schedules ITSELF to act later.
@@ -149,6 +150,11 @@ export const scheduler = {
   /** Fire every task that has come due. Exposed for tests and cold starts. */
   async tick(): Promise<void> {
     if (!runner) return;
+    // A due task must never start a second generation on top of a running one
+    // — the native LLM has one context and the two interleave. Leave it
+    // pending; the next tick picks it up. Seen firing 1.5s into a rehearsal
+    // beat's wrap-up turn (services/runLock).
+    if (isRunBusy()) return;
     const due = (await loadAll()).filter((t) => t.status === 'pending' && t.dueAtMs <= Date.now());
     for (const task of due) {
       const running = await update(task.id, { status: 'running' });

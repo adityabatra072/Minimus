@@ -25,6 +25,7 @@ import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
 import { composeRun } from '../services/intent';
+import { acquireRun, isRunBusy, releaseRun } from '../services/runLock';
 import { userExcludedTools, userToolGroups } from '../services/toolPlatform';
 import { ensureVoiceReady, VoicePipeline, type VoiceState } from '../services/voice';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -80,9 +81,6 @@ function domainOf(url: string): string {
   return m?.[1] ?? url;
 }
 
-// One agent generation at a time, app-wide: the native LLM has one context,
-// and this survives ChatScreen unmount/remount (screen switches).
-const globalRunLock = { current: false };
 
 // Seeded with time so Fast Refresh (which resets module state) can never
 // mint ids that collide with items already in React state.
@@ -136,11 +134,6 @@ export default function ChatScreen({
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
-  // Module-scoped guard (see globalRunLock): navigating to Models/Settings
-  // UNMOUNTS this screen; a component-local ref forgets the in-flight run and
-  // a fresh mount happily starts a second one — QA caught two generations
-  // fighting over the single native LLM (191s + 117s overlapped).
-  const runningRef = globalRunLock;
   const [working, setWorking] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Item>>(null);
@@ -188,8 +181,8 @@ export default function ChatScreen({
 
   const run = useCallback(
     async (prompt: string, origin: 'user' | 'scheduled' = 'user'): Promise<string> => {
-      if (!prompt.trim() || runningRef.current) return '';
-      runningRef.current = true;
+      // Shared with the rehearsal screen and the scheduler (services/runLock).
+      if (!prompt.trim() || !acquireRun()) return '';
       if (origin === 'user') setInput('');
       setRunning(true);
       setWorking(true);
@@ -304,7 +297,7 @@ export default function ChatScreen({
           },
         ]);
       } finally {
-        runningRef.current = false;
+        releaseRun();
         setRunning(false);
         setWorking(false);
         abortRef.current = null;
@@ -499,7 +492,7 @@ export default function ChatScreen({
   // full agent loop through this same path, so the audience watches it think.
   useEffect(() => {
     scheduler.setRunner(async (instruction) => {
-      for (let waited = 0; runningRef.current && waited < 120_000; waited += 500) {
+      for (let waited = 0; isRunBusy() && waited < 120_000; waited += 500) {
         await new Promise((r) => setTimeout(r, 500));
       }
       return run(instruction, 'scheduled');
