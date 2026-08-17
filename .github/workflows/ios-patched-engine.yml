@@ -95,6 +95,9 @@ jobs:
         working-directory: app/apps/mobile/ios
         run: pod install --repo-update
 
+      # Raw log kept: xcbeautify swallows linker diagnostics, and a failed Ld
+      # step reported only "The following build commands failed" with no
+      # symbol names, which is unfixable from a distance.
       - name: Build (Release, unsigned)
         working-directory: app/apps/mobile/ios
         run: |
@@ -109,7 +112,22 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
-            build | xcbeautify --renderer github-actions
+            build > xcodebuild.log 2>&1 || {
+              echo "=== last 200 lines ==="
+              tail -200 xcodebuild.log
+              echo "=== errors ==="
+              grep -nE "error:|Undefined symbol|symbol\(s\) not found|duplicate symbol|ld: " xcodebuild.log | head -60
+              exit 1
+            }
+          tail -5 xcodebuild.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: app/apps/mobile/ios/xcodebuild.log
+          if-no-files-found: ignore
 
       - name: Package unsigned IPA
         working-directory: app/apps/mobile/ios
