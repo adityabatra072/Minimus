@@ -6,14 +6,7 @@ import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { loadMacros } from '../tools/macroTools';
 import { diag } from '../services/diag';
-import {
-  deferredPreamble,
-  deferredToolExclusions,
-  isTeaching,
-  macroSteering,
-  teachingPreamble,
-  teachingToolExclusions,
-} from '../services/intent';
+import { composeRun } from '../services/intent';
 import { verbFor } from '../services/humanize';
 import { runSelfTests, type CheckResult } from '../services/selfTest';
 import { runDeepChecks } from '../services/deepTest';
@@ -37,7 +30,6 @@ interface Beat {
   /** Tool that must be called for the beat to count as working. */
   expectTool: string;
   /** Tool groups exposed for this beat — mirrors packages/eval/suites/demos.yaml. */
-  toolGroups: string[];
   /** Beats that yank focus to another app — opt in explicitly. */
   stealsFocus?: boolean;
   note?: string;
@@ -46,7 +38,6 @@ interface Beat {
 const BEATS: Beat[] = [
   {
     id: 'private-remember',
-    toolGroups: ['core', 'schedule'],
     title: '1. Private context — store',
     utterance:
       "Remember that I'm on 20mg of Lexapro, my therapist is Dr. Okafor, and my appointment is Thursday at 4pm.",
@@ -54,7 +45,6 @@ const BEATS: Beat[] = [
   },
   {
     id: 'watchdog-arm',
-    toolGroups: ['core', 'device', 'schedule'],
     title: '2. Watchdog — arm it',
     utterance:
       'Check my battery now and remember it. Then in 3 minutes check it again and tell me if it dropped more than 2 percent.',
@@ -63,7 +53,6 @@ const BEATS: Beat[] = [
   },
   {
     id: 'teach-macro',
-    toolGroups: ['core', 'device', 'schedule'],
     title: '3. Teach a verb',
     utterance:
       'New rule: when I say wind down, set the brightness to 20 percent, turn the flashlight off, and remind me to set my alarm.',
@@ -71,14 +60,12 @@ const BEATS: Beat[] = [
   },
   {
     id: 'run-macro',
-    toolGroups: ['core', 'device', 'schedule'],
     title: '3b. Say the verb',
     utterance: 'Wind down.',
     expectTool: 'run_macro',
   },
   {
     id: 'calendar-judgment',
-    toolGroups: ['schedule'],
     title: '4. Calendar judgment',
     utterance:
       "Look at tomorrow — find me 90 minutes for the gym that isn't before 10am and isn't straight after standup, and put it in.",
@@ -87,21 +74,18 @@ const BEATS: Beat[] = [
   },
   {
     id: 'private-recall',
-    toolGroups: ['core'],
     title: '1b. Private context — recall',
     utterance: 'What do I need to remember about Thursday?',
     expectTool: 'recall',
   },
   {
     id: 'flashlight',
-    toolGroups: ['device'],
     title: 'Bench: flashlight',
     utterance: 'turn on the flashlight',
     expectTool: 'flashlight',
   },
   {
     id: 'spotify',
-    toolGroups: ['music'],
     title: 'Bench: Spotify (opens Spotify)',
     utterance: 'Play Janice STFU on Spotify',
     expectTool: 'play_music',
@@ -182,25 +166,14 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       const macros = await loadMacros().catch(() => []);
       // Mirrors ChatScreen's preamble composition exactly — rehearsal must
       // test the same prompt the audience-facing screen will send.
-      const macroHit = macroSteering(beat.utterance, macros.map((m) => m.name));
-      const preamble = [
-        'You are Minimus, running entirely on this phone. You get things DONE using tools, then confirm briefly.',
-        macros.length > 0 && !isTeaching(beat.utterance)
-          ? `Phrases the user has taught you (run these with run_macro): ${macros
-              .map((m) => `"${m.name}"`)
-              .join(', ')}. If the user says one of them, call run_macro with that name.`
-          : '',
-        teachingPreamble(beat.utterance) ?? '',
-        deferredPreamble(beat.utterance) ?? '',
-        macroHit?.line ?? '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-      const excludeTools = [
-        ...deferredToolExclusions(beat.utterance),
-        ...teachingToolExclusions(beat.utterance),
-        ...(macroHit?.exclude ?? []),
-      ];
+      // The SHIPPING composition, same as the chat screen and the scheduled
+      // runner (agent-core/routing.ts). Beats used to carry a hand-written
+      // toolGroups list, which meant a green rehearsal could not tell you
+      // whether the app exposes the right tools — it tested the list, not the
+      // router.
+      const { toolGroups, excludeTools, preamble } = composeRun(beat.utterance, {
+        macroNames: macros.map((m) => m.name),
+      });
 
       const toolsCalled: string[] = [];
       let finalText = '';
@@ -215,7 +188,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
         const events: AsyncGenerator<AgentEvent> = new AgentLoop().run(beat.utterance, {
           adapter: new LocalAdapter(activeModelId),
           tools: registry,
-          toolGroups: beat.toolGroups,
+          toolGroups,
           excludeTools,
           preamble,
           approvals: async () => true,
