@@ -43,12 +43,19 @@ export const DEFAULT_POLICIES: ModelPolicy[] = [
     // end and producing no answer at 5 tokens/sec. That is seven minutes
     // spent on nothing.
     //
-    // 896 is sized off what a real turn needs: the widest tool call observed
-    // (define_macro with three steps) is around 120 tokens, and the answers
-    // are two sentences. A turn that wants more than this is spiralling, and
-    // the loop already recovers — it frees budget and re-asks, and a call cut
-    // mid-emission is salvaged by the parser.
-    maxOutputTokens: 896,
+    // Sized off THINKING, not off the call. 896 was sized off the widest tool
+    // call (define_macro with three steps, ~120 tokens) and that was the wrong
+    // measurement: on the iPhone it cut teach-macro off mid-deliberation three
+    // times, and the raw output showed the model reasoning perfectly —
+    // "<think>The user is teaching me a new rule... I need to use
+    // define_macro" — with no room left to emit it. Passing runs of that beat
+    // spend ~1200 tokens thinking before they act.
+    //
+    // 1536 leaves that headroom while still bounding the runaway case (a
+    // 2044-token turn of pure deliberation, seven minutes, no answer). With a
+    // ~1500-token prompt it also stays clear of the 4096 window, so an
+    // overrun means the model rambled rather than the context filling up.
+    maxOutputTokens: 1536,
     toolResultCharCap: 6000,
   },
   {
