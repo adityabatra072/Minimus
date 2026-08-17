@@ -32,3 +32,4 @@ replay_pid*.log
 dist-ios/
 sideloadlydaemon.log
 hs_err_*.log
+dist-release/

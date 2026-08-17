@@ -133,5 +133,10 @@ export function isTeaching(prompt: string): boolean {
 }
 
 export function teachingToolExclusions(prompt: string): string[] {
-  return TEACHING_RE.test(prompt) ? ['run_macro'] : [];
+  // `remember` is the other trap: teaching a phrase looks enough like storing
+  // a fact that the model writes the rule to memory and reports success
+  // without ever defining the macro (device evidence: remember(fact='When
+  // user says "wind down", set brightness to 20 percent...')). While the user
+  // is TEACHING, neither replaying nor remembering can be the right call.
+  return TEACHING_RE.test(prompt) ? ['run_macro', 'remember'] : [];
 }
