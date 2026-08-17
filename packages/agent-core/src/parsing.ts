@@ -268,6 +268,22 @@ function parsePythonicList(src: string): ParsedCall[] {
   return calls;
 }
 
+/**
+ * A call the model never closed: `[define_macro(...)` with the list bracket
+ * missing, or a bare `define_macro(...)` with no brackets at all.
+ *
+ * Device evidence (iPhone 15, teach-macro): the model emitted a complete and
+ * correct define_macro whose only defect was the absent final `]`, and the
+ * turn was reported as "no tools" — the model did the work and got a retry
+ * for a punctuation slip, at 100 seconds a turn. Gated on a KNOWN tool name,
+ * so prose like "[see note(1)" is never promoted into a call.
+ */
+function salvageUnclosedCall(trimmed: string, known: Set<string>): ParsedCall | null {
+  const m = /^\[?\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\([\s\S]*\)\s*$/.exec(trimmed);
+  if (!m || !known.has(m[1]!)) return null;
+  return tryParsePythonicCall(trimmed.replace(/^\[/, ''));
+}
+
 export type WireFormat = 'hermes' | 'pythonic';
 
 /**
@@ -306,12 +322,17 @@ export function parseAssistantOutput(
     // even when the tool name is unknown, so validation can nudge a retry —
     // otherwise a typo'd tool name would silently become the "final answer".
     const wholePythonic = /^\[\s*[A-Za-z_][A-Za-z0-9_.-]*\s*\([\s\S]*\)\s*\]$/.test(trimmed);
+    const salvaged =
+      format === 'pythonic' && !wholePythonic ? salvageUnclosedCall(trimmed, known) : null;
     if (format === 'pythonic' && wholePythonic) {
       const parsed = parsePythonicList(trimmed);
       if (parsed.length > 0) {
         calls.push(...parsed);
         text = '';
       }
+    } else if (salvaged) {
+      calls.push(salvaged);
+      text = '';
     } else if (format === 'pythonic') {
       // Bare `[func(...)]` embedded in prose — only trust it for KNOWN tools
       // (citations like "[see note(1)]" must stay text).

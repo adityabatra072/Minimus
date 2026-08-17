@@ -66,6 +66,30 @@ describe('hermes format', () => {
 });
 
 describe('pythonic (LFM) format', () => {
+  // iPhone 15, teach-macro: the model emitted a complete, correct call and
+  // simply never wrote the closing `]`. That cost a 100-second turn and was
+  // reported as "no tools", which is the worst possible outcome — the model
+  // was right and the harness said it did nothing.
+  it('salvages a call the model never closed', () => {
+    const body =
+      "define_macro(name='wind down', steps=[{'tool': 'flashlight', 'arguments': {'on': False}}])";
+    const known = [...TOOLS, 'define_macro'];
+
+    const unclosed = parseAssistantOutput(`[${body}`, 'pythonic', known);
+    expect(unclosed.calls).toHaveLength(1);
+    expect(unclosed.calls[0]!.name).toBe('define_macro');
+    expect(unclosed.calls[0]!.arguments.name).toBe('wind down');
+    expect(unclosed.text).toBe('');
+
+    // No brackets at all is the same slip.
+    const unbracketed = parseAssistantOutput(body, 'pythonic', known);
+    expect(unbracketed.calls).toHaveLength(1);
+
+    // An unknown name stays prose: salvage must not invent tools.
+    const unknown = parseAssistantOutput("[rm_rf(path='/')", 'pythonic', known);
+    expect(unknown.calls).toHaveLength(0);
+  });
+
   it('parses the tagged form', () => {
     const out = parseAssistantOutput(
       '<|tool_call_start|>[get_weather(location="Mumbai")]<|tool_call_end|>',
