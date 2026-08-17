@@ -34,7 +34,7 @@ function lfmArgValue(value: unknown): string {
   return String(value);
 }
 
-function toChatMl(messages: ChatMessage[], lfm: boolean, suppressThinking: boolean): string {
+function toChatMl(messages: ChatMessage[], lfm: boolean): string {
   let out = '';
   const turn = (role: string, content: string) => {
     out += `${IM_START}${role}\n${content}${IM_END}\n`;
@@ -83,20 +83,11 @@ function toChatMl(messages: ChatMessage[], lfm: boolean, suppressThinking: boole
   // emits EOS instead of deliberating; the rig never saw it because
   // llama-server applies the real template.
   //
-  // suppressThinking (set by the loop after a thinking overrun) pre-CLOSES
-  // the block instead: the model starts directly in answer mode and cannot
-  // re-spiral.
-  if (lfm) {
-    // An EMPTY <think></think> reads as off-distribution and the model stops
-    // dead (observed: events=4, 15 characters, no answer). A short CLOSED
-    // thought reads as deliberation that already finished, so generation
-    // continues straight into the answer — which is the point of suppressing.
-    out += suppressThinking
-      ? `${IM_START}assistant\n<think>I have everything I need. I will answer now.</think>`
-      : `${IM_START}assistant\n<think>`;
-  } else {
-    out += `${IM_START}assistant\n`;
-  }
+  // Prefilling a CLOSED thought to suppress deliberation was tried and
+  // removed: on device it produced dead generations (events=4, 22 characters,
+  // no answer) and cost two beats that had been passing. Thinking is not
+  // steerable from the prompt here; the harness frees context budget instead.
+  out += lfm ? `${IM_START}assistant\n<think>` : `${IM_START}assistant\n`;
   return out;
 }
 
@@ -108,8 +99,7 @@ export class LocalAdapter implements ModelAdapter {
     options: GenerateOptions,
   ): AsyncIterable<AdapterEvent> {
     const lfm = this.modelId.toLowerCase().includes('lfm');
-    const suppressThinking = options.suppressThinking === true;
-    const prompt = toChatMl(messages, lfm, suppressThinking);
+    const prompt = toChatMl(messages, lfm);
     console.log(`[minimus] generate start model=${this.modelId} promptChars=${prompt.length}`);
     const stream = RunAnywhere.llm.generateStream(prompt, {
       model: this.modelId,
@@ -129,8 +119,8 @@ export class LocalAdapter implements ModelAdapter {
 
     // The prompt pre-opened <think> for LFM — surface the opening tag to the
     // harness so extractReasoning sees a complete block when the model closes
-    // it with its own </think>. (Not when the prompt pre-CLOSED it.)
-    if (lfm && !suppressThinking) yield { type: 'delta', text: '<think>' };
+    // it with its own </think>.
+    if (lfm) yield { type: 'delta', text: '<think>' };
     let inThinking = false;
     // Stream forensics: rig A/B proved the silent turns are runtime-specific,
     // not prompt-text — so the stream itself must testify. Counts by kind +

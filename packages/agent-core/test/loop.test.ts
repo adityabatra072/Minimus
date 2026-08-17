@@ -121,25 +121,6 @@ describe('AgentLoop', () => {
     expect(finished(events).reason).toBe('error');
   });
 
-  it('suppresses thinking on the attempt after a thinking overrun', async () => {
-    const { tools } = makeTools();
-    const seenOptions: boolean[] = [];
-    const adapter = new MockAdapter([
-      '<think>endless deliberation with no conclusion</think>',
-      'Paris.',
-    ]);
-    const origGenerate = adapter.generate.bind(adapter);
-    adapter.generate = (messages, options) => {
-      seenOptions.push(options.suppressThinking === true);
-      return origGenerate(messages, options);
-    };
-    const events = await collect(new AgentLoop().run('capital of france?', { adapter, tools }));
-    expect(finished(events).reason).toBe('completed');
-    expect(finished(events).finalText).toBe('Paris.');
-    // First attempt: thinking allowed. Retry after overrun: suppressed.
-    expect(seenOptions).toEqual([false, true]);
-  });
-
   it('retries a tool call that was cut off mid-generation', async () => {
     const { tools, log } = makeTools();
     // Device evidence: output window exhausted mid-call → raw ends in an

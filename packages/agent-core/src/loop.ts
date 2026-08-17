@@ -150,7 +150,6 @@ export class AgentLoop {
     let streakCount = 0;
     let streakNudged = false;
     let emptyAnswerNudges = 0;
-    let suppressThinkingNextTurn = false;
     /** Side effects that actually landed — the run's real output. */
     let toolsSucceeded = 0;
     let hintsDropped = false;
@@ -173,13 +172,8 @@ export class AgentLoop {
           temperature: policy.temperature,
           topP: policy.topP,
           maxOutputTokens: policy.maxOutputTokens,
-          // After a thinking overrun, polite nudges get ignored (observed:
-          // 2000+ chars of re-thinking). Pre-close the think block instead —
-          // the model physically starts in answer mode.
-          ...(suppressThinkingNextTurn ? { suppressThinking: true } : {}),
           ...(config.signal ? { signal: config.signal } : {}),
         });
-        suppressThinkingNextTurn = false;
         for await (const ev of stream) {
           if (ev.type === 'delta') {
             raw += ev.text;
@@ -294,7 +288,6 @@ export class AgentLoop {
             }),
           };
         }
-        suppressThinkingNextTurn = true;
         yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: 'thinking overrun' };
         yield { type: 'turn_finished', turn };
         continue;
@@ -421,12 +414,7 @@ export class AgentLoop {
           });
           // No tool_call_finished here: nothing executed, and painting a
           // second op on the UI rail makes the agent look like it stutters.
-          // Also force the next turn into answer mode: a model that repeats a
-          // call has stopped making progress, and its "let me reconsider" turn
-          // is the most expensive thing in the run (20-60s of thinking on a
-          // phone) for information it already has.
-          suppressThinkingNextTurn = true;
-          yield { type: 'duplicate_call_suppressed', call };
+            yield { type: 'duplicate_call_suppressed', call };
           continue;
         }
 

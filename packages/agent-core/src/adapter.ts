@@ -19,12 +19,6 @@ export interface GenerateOptions {
   maxOutputTokens: number;
   stopSequences?: string[];
   signal?: AbortSignal;
-  /**
-   * Force the model to answer WITHOUT deliberating this turn — set by the
-   * loop after a thinking-overrun retry. Adapters for models with prompt-
-   * level thinking scaffolds (LFM) pre-close the think block; others ignore.
-   */
-  suppressThinking?: boolean;
 }
 
 export type AdapterEvent =
