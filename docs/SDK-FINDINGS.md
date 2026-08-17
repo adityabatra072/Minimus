@@ -74,27 +74,45 @@ LLM.LlamaCpp: Final context size: 2048 (fitted=4096, train=128000, cap=2048)
 ```
 
 The device fits 4096 and the model trains at 128k, but the context is 2048.
-Two defects combine:
+Three defects combine, and the first one is upstream of the other two — the
+value never gets far enough for the key mismatch to matter:
 
-1. **Key mismatch.** `model_lifecycle_translation.cpp::load_options_json()`
-   emits `"context_length"` (from `ModelLoadRequest.context_length`), while
-   `llamacpp_backend.cpp::load_model()` reads `"context_size"`. Nothing on the
-   v4 load path ever writes `context_size`, so `models.load(id, {
-   contextLength })` is silently discarded and `user_context_size` stays 0.
-2. **The cap can only lower, never raise.** `context_size_ = std::min({fitted,
+1. **The llamacpp plugin drops `config_json` on the floor.** Commons does its
+   part: `load_options_json()` builds `{"context_length":N}` and
+   `create_backend_impl()` passes it to `llm_ops->create(path, config_json,
+   ...)`. But `rac_backend_llamacpp_register.cpp::llamacpp_llm_create_impl()`
+   names the parameter `/*config_json*/` and never reads it, then builds a
+   `rac_runtime_session_desc_t` leaving `options_json` unset — even though the
+   descriptor has that exact field. Its `create_session` then calls
+   `rac_llm_llamacpp_create(path, nullptr, ...)`, so the engine is constructed
+   with no config at all. The comment says so outright: "today we pass nullptr
+   to rac_llm_llamacpp_create to use defaults."
+2. **Key mismatch.** Even once a config arrives,
+   `model_lifecycle_translation.cpp::load_options_json()` emits
+   `"context_length"` while `llamacpp_backend.cpp::load_model()` reads
+   `"context_size"`.
+3. **The cap can only lower, never raise.** `context_size_ = std::min({fitted,
    train, max_default_context_})` with `max_default_context_` defaulting to
    2048, so even an honoured request above 2048 would be clamped back down.
+
+Worth stressing how defect 1 hides: patching only 2 and 3 changes nothing
+observable, and the device still logs `cap=2048`. What proved the patched
+library was even running was the log's own line number moving from 623 to 637.
 
 Consequence for an agent app: with a ~1200-token system prompt, deliberation
 plus the answer had roughly 800 tokens. That is exactly where the thinking
 overruns and mid-call truncations came from.
 
-- Fix (staged in this clone, not yet built): also read `"context_length"`, and
-  raise `max_default_context_` when the caller explicitly asks for more.
-- Not shipped in the app because the RN packages consume prebuilt native
-  artifacts: Android would need `librac_backend_llamacpp.so` rebuilt, iOS
-  needs the xcframework rebuilt on macOS. Shipping the two platforms on
-  different engines was the worse option.
+- Fix: `patches/engine/llamacpp-honour-context-length.patch` in this repo —
+  forward `config_json` onto the session descriptor and parse it into the
+  engine config, read `"context_length"` as well as `"context_size"`, and let
+  an explicit request raise the cap.
+- Building it: the RN packages ship prebuilt native artifacts, so the patch
+  only takes effect once the engine is rebuilt.
+  `scripts/engine/build-android-engine.ps1` does Android from Windows (no Mac,
+  no WSL — run it from PowerShell, since MSYS mangles the CMake path
+  arguments), and `.github/workflows/ios-patched-engine.yml` does iOS on the
+  same macOS runner that already builds the IPA.
 
 ## 5b. Android native build script is not usable on Windows
 

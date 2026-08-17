@@ -25,3 +25,61 @@ index 07124b24b..64e43fdb9 100644
  
      model_config_ = config;
      model_path_ = resolved_path;
+diff --git a/engines/llamacpp/rac_backend_llamacpp_register.cpp b/engines/llamacpp/rac_backend_llamacpp_register.cpp
+index e70223de4..bf5169b08 100644
+--- a/engines/llamacpp/rac_backend_llamacpp_register.cpp
++++ b/engines/llamacpp/rac_backend_llamacpp_register.cpp
+@@ -58,8 +58,29 @@ rac_result_t llamacpp_cpu_provider_create_session(const rac_runtime_session_desc
+         return RAC_ERROR_INVALID_PATH;
+     }
+ 
++    // Carry the caller's load knobs into the engine. Commons hands the v4
++    // ModelLoadRequest down as advisory config_json ("context_length"), and
++    // dropping it here is why models.load({ contextLength }) had no effect:
++    // every model loaded at the engine's default cap no matter what the app
++    // asked for. "context_size" is accepted too — that is the key the engine's
++    // own config uses.
++    rac_llm_llamacpp_config_t cfg = {};
++    bool have_cfg = false;
++    if (desc->options_json != nullptr && desc->options_json[0] != '\0') {
++        auto parsed = nlohmann::json::parse(desc->options_json, nullptr, /*allow_exceptions=*/false);
++        if (parsed.is_object()) {
++            for (const char* key : {"context_length", "context_size"}) {
++                if (parsed.contains(key) && parsed[key].is_number_integer()) {
++                    cfg.context_size = parsed[key].get<int32_t>();
++                    have_cfg = cfg.context_size > 0;
++                }
++            }
++        }
++    }
++
+     rac_handle_t backend_handle = nullptr;
+-    rac_result_t rc = rac_llm_llamacpp_create(desc->model_path, nullptr, &backend_handle);
++    rac_result_t rc =
++        rac_llm_llamacpp_create(desc->model_path, have_cfg ? &cfg : nullptr, &backend_handle);
+     if (rc != RAC_SUCCESS)
+         return rc;
+     *out = reinterpret_cast<rac_runtime_session_t*>(backend_handle);
+@@ -284,10 +305,10 @@ static rac_result_t llamacpp_vtable_clear_context(void* impl) {
+ // limited to the backend library via symbol hiding (the struct is `const`).
+ // The `create` adapter called by commons rac_llm_create() after
+ // rac_plugin_find picks this plugin. Replaces the legacy factory that was
+-// registered via rac_service_provider_t::create. The config_json parameter is
+-// reserved for future engine-specific tuning (num_threads, gpu_layers, etc.);
+-// today we pass nullptr to rac_llm_llamacpp_create to use defaults.
+-rac_result_t llamacpp_llm_create_impl(const char* model_id, const char* /*config_json*/,
++// registered via rac_service_provider_t::create. config_json carries the v4
++// load knobs from commons (context_length today); it is forwarded on the
++// session descriptor so the CPU provider can apply it at model load.
++rac_result_t llamacpp_llm_create_impl(const char* model_id, const char* config_json,
+                                       void** out_impl) {
+     if (!model_id || !out_impl) {
+         return RAC_ERROR_NULL_POINTER;
+@@ -307,6 +328,7 @@ rac_result_t llamacpp_llm_create_impl(const char* model_id, const char* /*config
+     desc.primitive = RAC_PRIMITIVE_GENERATE_TEXT;
+     desc.model_format = RAC_MODEL_FORMAT_ID_GGUF;
+     desc.model_path = model_id;
++    desc.options_json = config_json;
+ 
+     rac_runtime_session_t* runtime_session = nullptr;
+     rc = runtime->create_session(&desc, &runtime_session);

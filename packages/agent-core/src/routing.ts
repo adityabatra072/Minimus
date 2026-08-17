@@ -1,6 +1,25 @@
 /**
  * Deterministic pre-routing for the agent prompt.
  *
+ * READ THIS FIRST: keyword routing is NO LONGER the default. It exists for a
+ * model loaded in a small context window, and nothing else.
+ *
+ * It was written when every model loaded at 2048 tokens (docs/SDK-FINDINGS.md
+ * §5) and the full tool set cost 1261 of them. Under that pressure, showing
+ * the model only the relevant groups was the difference between working and
+ * stalling. But keyword matching decides what the model is ALLOWED to do from
+ * the words the user happened to use, and it is wrong constantly once you
+ * leave the demo script: "How much space have I got left on this phone?"
+ * routed to `comms`, because "phone" is a comms trigger, so device_info was
+ * never on the table. Measured on suites/general.yaml, 7 of 16 ordinary
+ * requests never saw the tool they needed — a failure the model cannot
+ * recover from, because you cannot call a tool you were not given.
+ *
+ * With the engine patched to honour the requested context window, the full
+ * set fits, so composeRun exposes everything by default and the model gets to
+ * decide. Narrow exposure stays available (`narrowExposure: true`) for a
+ * small window, where a wrong guess still beats no room to think.
+ *
  * Why this exists: on-device generation budgets are tight — the C++ layer
  * accounts generation against a ~2048-token window, so a system prompt
  * carrying all 16 tool schemas leaves a deliberation-heavy model almost no
@@ -132,9 +151,20 @@ export function isTeaching(prompt: string): boolean {
   return TEACHING_RE.test(prompt);
 }
 
+/**
+ * Every group except `vision`, which is attachment-gated (describe_image with
+ * no image attached is a tool that can only be called wrongly).
+ */
+export const ALL_TOOL_GROUPS = ['core', 'device', 'schedule', 'web', 'comms', 'music'];
+
 export interface ComposeOptions {
   /** Phrases the user has taught, by name. */
   macroNames?: string[];
+  /**
+   * Route by keyword instead of exposing every group. Only for a model
+   * loaded in a small context window — see the note on routeToolGroups.
+   */
+  narrowExposure?: boolean;
   /** 'scheduled' when the agent woke itself for a task it queued earlier. */
   origin?: 'user' | 'scheduled';
   hasAttachment?: boolean;
@@ -197,7 +227,7 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
 
   return {
     toolGroups: [
-      ...routeToolGroups(prompt, macroNames),
+      ...(opts.narrowExposure ? routeToolGroups(prompt, macroNames) : ALL_TOOL_GROUPS),
       ...(opts.extraToolGroups ?? []),
       ...(opts.hasAttachment ? ['vision'] : []),
     ],
