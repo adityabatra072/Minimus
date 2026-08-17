@@ -197,27 +197,42 @@ jobs:
       # Raw log kept: xcbeautify swallows linker diagnostics, and a failed Ld
       # step reported only "The following build commands failed" with no
       # symbol names, which is unfixable from a distance.
+      # Two passes, deliberately. CocoaPods populates
+      # XCFrameworkIntermediates/RunAnywhereCore/librac_commons.a from a script
+      # phase that is not declared as producing that file, so on a clean
+      # derived-data directory the link step races it and pass one dies with
+      # "Build input file cannot be found". Pass two links against the file the
+      # first pass copied. ios-build.yml has always done this (its `||`
+      # fallback), which is the only reason it appears to work first time —
+      # its successful run shows the very same error before the retry.
       - name: Build (Release, unsigned)
         working-directory: app/apps/mobile/ios
         run: |
           set -o pipefail
-          xcodebuild \
-            -workspace mobile.xcworkspace \
-            -scheme mobile \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO \
-            build > xcodebuild.log 2>&1 || {
+          build() {
+            xcodebuild \
+              -workspace mobile.xcworkspace \
+              -scheme mobile \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath build \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              ENABLE_USER_SCRIPT_SANDBOXING=NO \
+              build > xcodebuild.log 2>&1
+          }
+          if ! build; then
+            echo "pass 1 failed; retrying now that the xcframework slices are staged"
+            grep -nE "error:" xcodebuild.log | head -10 || true
+            build || {
               echo "=== last 200 lines ==="
               tail -200 xcodebuild.log
               echo "=== errors ==="
               grep -nE "error:|Undefined symbol|symbol\(s\) not found|duplicate symbol|ld: " xcodebuild.log | head -60
               exit 1
             }
+          fi
           tail -5 xcodebuild.log
 
       - name: Upload build log
