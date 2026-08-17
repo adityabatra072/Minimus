@@ -56,16 +56,29 @@ jobs:
         working-directory: app
         run: npm run build -w @minimus/agent-core
 
-      # Only the llamacpp framework is replaced, so every other backend stays
-      # the published binary. Building them here would add an hour and pull
-      # third-party archives we do not touch.
+      # Every backend has to build: the Swift package requires the Sherpa and
+      # NeuRT binaries unconditionally, so turning them off fails immediately
+      # ("RAC_BACKEND_SHERPA and RAC_BACKEND_NEURT must be ON"). Only the
+      # llamacpp slice is actually installed below; the rest are built and
+      # thrown away. Steps mirror the SDK's own ios/swift-spm CI jobs.
+      - name: Install build tools
+        run: brew install protobuf ninja
+
+      - name: Download vendored ONNX Runtime and Sherpa (iOS + macOS)
+        working-directory: sdk
+        run: |
+          bash sdk/runanywhere-commons/scripts/ios/download-onnx.sh
+          bash sdk/runanywhere-commons/scripts/ios/download-sherpa-onnx.sh
+          bash sdk/runanywhere-commons/scripts/macos/download-sherpa-onnx.sh
+
       - name: Build the patched llamacpp xcframework
         working-directory: sdk
         env:
-          RAC_BACKEND_ONNX: 'OFF'
-          RAC_BACKEND_SHERPA: 'OFF'
-          RAC_BACKEND_NEURT: 'OFF'
-          RAC_BACKEND_MLX: 'OFF'
+          # NeuRT (Apple ANE) lives in a private sibling repo. Without it the
+          # engine builds as a non-routable shell, which is fine here: this
+          # job ships only the llamacpp framework, and the published NeuRT
+          # binary in node_modules is left untouched.
+          RAC_ALLOW_NEURT_STUB: '1'
         run: ./sdk/runanywhere-swift/scripts/build-core-xcframework.sh
 
       - name: Swap it into node_modules
