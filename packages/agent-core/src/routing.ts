@@ -88,8 +88,10 @@ export function deferredPreamble(prompt: string): string | null {
   if (!DEFERRED_RE.test(prompt)) return null;
   return (
     'Part of this request happens LATER. Do the immediate part now with tools, ' +
-    'then hand the later part to schedule_task (instruction = what to do, when = when) — ' +
-    'schedule_task runs YOU again at that time to do it. After handing it off, give your short final answer.'
+    'then hand the later part to schedule_task (instruction = what to do, when = "+N" minutes from now) — ' +
+    'schedule_task runs YOU again at that time to do it. Give `when` as a relative offset like "+3", ' +
+    'never an absolute clock time: your own thinking takes minutes, so a timestamp you compute now is ' +
+    'already stale by the time the tool runs. After handing it off, give your short final answer.'
   );
 }
 

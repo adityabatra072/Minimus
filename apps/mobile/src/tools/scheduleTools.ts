@@ -144,7 +144,11 @@ export function scheduleTools(): ToolDefinition[] {
             type: 'string',
             description: 'what to do when the time comes, written as an instruction to yourself',
           },
-          when: { type: 'string', description: 'when to run: "+30" for 30 minutes, "07:30", or an ISO datetime' },
+          when: {
+            type: 'string',
+            description:
+              'minutes from now as "+N" (use this: "+3" means three minutes from now). "07:30" or an ISO datetime also work but must be in the future',
+          },
         },
         required: ['instruction', 'when'],
       },
@@ -152,6 +156,17 @@ export function scheduleTools(): ToolDefinition[] {
         const instruction = String(args['instruction']).trim();
         if (!instruction) throw new Error('instruction must not be empty');
         const dueAtMs = parseWhen(String(args['when']));
+        // A model that writes an absolute timestamp computes it from when it
+        // STARTED thinking, and thinking takes minutes on a phone — device
+        // evidence: "in 3 minutes" became when="2026-08-18T02:00:00", and an
+        // earlier run armed a task that came due 1.5s later. Refuse the past
+        // and say what to send instead, rather than firing immediately and
+        // looking broken.
+        if (dueAtMs <= Date.now()) {
+          throw new Error(
+            'that time has already passed — send a relative offset instead, like "+3" for three minutes from now',
+          );
+        }
         const task = await scheduler.schedule(instruction, dueAtMs);
         return {
           ok: true,
