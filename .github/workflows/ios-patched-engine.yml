@@ -121,6 +121,14 @@ jobs:
           swapped=0
           for built in sdk/sdk/runanywhere-swift/Binaries/*.xcframework; do
             name="$(basename "$built")"
+            # NeuRT builds as a 0-byte stub here (its implementation lives in a
+            # private sibling repo), so installing ours would replace a working
+            # Apple-ANE binary with nothing. Nothing about it is patched, so
+            # keep the published one.
+            if [ "$name" = "RABackendNeuRT.xcframework" ]; then
+              echo "skipping $name (stub in this build; published binary kept)"
+              continue
+            fi
             for dest in app/node_modules/@runanywhere/*/ios/Binaries/"$name"; do
               [ -d "$dest" ] || continue
               rm -rf "$dest"
