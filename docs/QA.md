@@ -1,17 +1,27 @@
 # QA plan
 
-Two layers, because they fail differently:
+Three layers, because they fail differently:
 
 1. **System checks** (Rehearsal screen, "system checks" button). Deterministic,
    under a second, no model involved: tool schemas, prompt budget, intent
    routing, tool-call parsing, schedule parsing, native bridge, storage,
    stores, live calendar access. Run these first — a red check means the
    plumbing is broken and every agent beat after it is noise.
-2. **Agent beats** (Rehearsal screen, "Run all beats"). Real model, real tools,
-   on the real device. Slow (20 to 90 seconds each) and the only way to catch
-   model-behavior regressions.
+2. **Deep checks** (Rehearsal screen, "deep"). Every feature the demo beats do
+   not touch, run against the real subsystem: a TTS-to-STT voice round trip
+   (no microphone needed), MCP server connections, custom HTTP tools, the
+   vision model, notifications and timers, a calendar write read back, web
+   search, and storage round trips for memories, macros, scheduled tasks,
+   sessions and settings — each cleaning up after itself. A check whose
+   prerequisite is missing reports "skipped", never a quiet pass. Minutes on
+   first run if it has to download the voice pack.
+3. **Agent beats** (Rehearsal screen, "Run all beats"). Real model, real tools,
+   on the real device. Slow (20 to 90 seconds each on an iPhone 15, several
+   minutes each on an older Android) and the only way to catch model-behavior
+   regressions.
 
-Both are covered by the shareable report ("share report" next to the tally).
+All three are covered by the shareable report ("share report" next to the
+tally).
 
 ## Before a run
 
@@ -34,25 +44,23 @@ Both are covered by the shareable report ("share report" next to the tally).
 | flashlight | native device control |
 | spotify (opt-in) | track resolution and playback, leaves the app |
 
-## Manual passes the beats cannot cover
+## Manual passes nothing can automate
 
-These need a human (or an adb driver) because they involve permissions,
-attachments, or other apps:
+Only three, and each needs a human because it needs a human's voice, the OS
+picker, or another app's UI:
 
-- **Voice**: tap the mic, say "turn on the flashlight". First tap downloads the
-  voice pack (about 220MB). Then enable hands-free in Settings and try
-  "E.V, what's my battery?"
-- **Images**: attach a photo with the composer's + button and ask what it is.
-  First use downloads SmolVLM (about 500MB).
-- **Sessions**: send a message, force-quit, reopen — the chat is still there.
-  New chat (+), history (menu → Chats), reopen an old one.
-- **Settings**: toggle approvals off and confirm an email request stops asking;
-  toggle a remote endpoint on and confirm the header badge flips to "cloud".
-- **Tools screen**: switch a built-in tool off and confirm the agent stops
-  using it; add an HTTP tool; add an MCP server and confirm its tools appear.
-- **Agent data**: Settings shows every memory, taught phrase and scheduled
-  task, each individually deletable.
-- **Approval cards**: ask it to email someone and confirm the run pauses.
+- **Wake word**: enable hands-free in Settings, say "E.V, what's my battery?"
+  out loud. The transcript-matching logic is covered by the routing checks, but
+  a real spoken trigger is not automatable.
+- **Image picking**: the OS photo picker itself. The VLM path underneath is
+  covered by the deep checks; this confirms the picker returns a usable path.
+- **Spotify playback**: the beat proves the track resolves and the app opens;
+  confirming audio actually plays is a human ear.
+
+Worth eyeballing once per release, though all of it is machine-checked:
+approval cards pausing a run, the on-device/cloud badge flipping when a remote
+endpoint is enabled, and Settings listing every memory, taught phrase and
+scheduled task with a working delete.
 
 ## Driving QA from a laptop
 
