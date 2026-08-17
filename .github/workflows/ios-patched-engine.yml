@@ -182,6 +182,18 @@ jobs:
         working-directory: app/apps/mobile/ios
         run: pod install --repo-update
 
+      # The archive is a real 18MB file when the swap step checks it, and by
+      # the time CocoaPods rsyncs the slice only 20MB of Headers move. Whatever
+      # eats it happens in between, so look right here.
+      - name: Is the archive still there after pod install
+        run: |
+          echo "=== node_modules slice ==="
+          ls -la app/node_modules/@runanywhere/core/ios/Binaries/RACommons.xcframework/ios-arm64/
+          echo "=== what the podspec vendors ==="
+          grep -rn "vendored\|Binaries" app/node_modules/@runanywhere/core/*.podspec 2>/dev/null | head -10
+          echo "=== anything under Pods ==="
+          find app/apps/mobile/ios/Pods -maxdepth 3 -name "RACommons.xcframework" 2>/dev/null | head -5
+
       # Raw log kept: xcbeautify swallows linker diagnostics, and a failed Ld
       # step reported only "The following build commands failed" with no
       # symbol names, which is unfixable from a distance.
