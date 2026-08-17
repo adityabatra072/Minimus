@@ -1,5 +1,5 @@
 diff --git a/engines/llamacpp/llamacpp_backend.cpp b/engines/llamacpp/llamacpp_backend.cpp
-index 07124b24b..64e43fdb9 100644
+index 07124b24b..8b0e81099 100644
 --- a/engines/llamacpp/llamacpp_backend.cpp
 +++ b/engines/llamacpp/llamacpp_backend.cpp
 @@ -406,9 +406,22 @@ bool LlamaCppTextGeneration::load_model(const std::string& model_path,
@@ -25,6 +25,164 @@ index 07124b24b..64e43fdb9 100644
  
      model_config_ = config;
      model_path_ = resolved_path;
+@@ -693,6 +706,8 @@ bool LlamaCppTextGeneration::unload_model_internal() {
+ 
+     model_loaded_ = false;
+     model_path_.clear();
++    // The context that held these is gone.
++    kv_prompt_tokens_.clear();
+ 
+     RAC_LOG_INFO("LLM.LlamaCpp", "Model unloaded");
+     return true;
+@@ -1077,12 +1092,19 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+         return false;
+     }
+ 
+-    // Clear KV cache before each new generation to avoid position conflicts on
+-    // sequential calls (fixes #356: SIGABRT on second decode on Android arm64).
++    // The KV cache is NOT cleared here. An agent loop re-sends the whole
++    // conversation every turn, so the prompt is typically 90%+ identical to
++    // the previous one, and clearing meant paying full prefill again each
++    // turn: measured on a OnePlus 9R, ~110s per turn to re-process a
++    // ~1500-token prompt at ~13 tok/s. The reuse itself happens after
++    // tokenization, once the final token list is known — see kv_prompt_tokens_.
++    //
++    // The clear this replaces existed to avoid position conflicts on
++    // sequential calls (#356: SIGABRT on second decode on Android arm64).
++    // That is still handled: the divergent suffix is dropped with
++    // llama_memory_seq_rm before anything is decoded, so no position is ever
++    // written twice.
+     llama_memory_t mem = llama_get_memory(context_);
+-    if (mem) {
+-        llama_memory_clear(mem, true);
+-    }
+ 
+     // Honor the per-request thread hint (idl/llm_options.proto:119).
+     // 0 = backend default (the model-load thread count already on the context).
+@@ -1175,13 +1197,36 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+     RAC_LOG_INFO("LLM.LlamaCpp", "Generation: prompt_tokens=%d, max_tokens=%d, context=%d",
+                  prompt_tokens, effective_max_tokens, n_ctx);
+ 
++    // How much of this prompt is already decoded and sitting in the KV from
++    // the previous generation. The last prompt token is always re-decoded
++    // (it is what produces the logits we sample from), so the reusable run is
++    // capped at prompt_tokens - 1.
++    int n_reuse = 0;
++    if (mem != nullptr) {
++        const int reusable =
++            std::min(static_cast<int>(kv_prompt_tokens_.size()), prompt_tokens - 1);
++        while (n_reuse < reusable && kv_prompt_tokens_[n_reuse] == tokens_list[n_reuse]) {
++            ++n_reuse;
++        }
++        if (n_reuse > 0) {
++            // Drop everything after the shared prefix so the positions we are
++            // about to write are free.
++            llama_memory_seq_rm(mem, 0, n_reuse, -1);
++        } else {
++            llama_memory_clear(mem, true);
++        }
++    }
++    kv_prompt_tokens_.clear();
++
+     const int n_batch = batch_size_ > 0 ? batch_size_ : n_ctx;
+-    RAC_LOG_INFO("LLM.LlamaCpp", "generate_stream: processing %d prompt tokens in chunks of %d",
+-                 prompt_tokens, n_batch);
++    RAC_LOG_INFO("LLM.LlamaCpp",
++                 "generate_stream: processing %d prompt tokens in chunks of %d (%d reused from "
++                 "cache, %d to decode)",
++                 prompt_tokens, n_batch, n_reuse, prompt_tokens - n_reuse);
+     llama_batch batch = llama_batch_init(n_batch, 0, 1);
+ 
+     const auto prefill_start = std::chrono::steady_clock::now();
+-    for (int chunk_start = 0; chunk_start < prompt_tokens; chunk_start += n_batch) {
++    for (int chunk_start = n_reuse; chunk_start < prompt_tokens; chunk_start += n_batch) {
+         batch.n_tokens = 0;
+         int chunk_end = std::min(chunk_start + n_batch, prompt_tokens);
+         bool is_last_chunk = (chunk_end == prompt_tokens);
+@@ -1194,6 +1239,11 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+         if (llama_decode(context_, batch) != 0) {
+             RAC_LOG_ERROR("LLM.LlamaCpp", "llama_decode failed for prompt chunk [%d..%d)",
+                           chunk_start, chunk_end);
++            // The cache is now half-written and cannot be trusted as a prefix
++            // for anything: start the next generation from scratch.
++            if (mem != nullptr) {
++                llama_memory_clear(mem, true);
++            }
+             llama_batch_free(batch);
+             return false;
+         }
+@@ -1268,8 +1318,19 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+     //   3. rac_llm_stream.cpp: proto-byte event emitter
+     // Deferred to avoid breaking changes to the stable ABI.
+ 
++    // Keep the prompt in the KV for the next generation and drop only what we
++    // generated on top of it. The generated text comes back as part of the
++    // next prompt (the assistant turn), so it gets re-decoded there as part of
++    // that prompt's suffix — this keeps kv_prompt_tokens_ exactly aligned with
++    // KV positions [0, prompt_tokens), which is what makes the prefix
++    // comparison safe.
+     if (llama_memory_t post_mem = llama_get_memory(context_)) {
+-        llama_memory_clear(post_mem, true);
++        if (decode_failed_.load()) {
++            llama_memory_clear(post_mem, true);
++        } else {
++            llama_memory_seq_rm(post_mem, 0, prompt_tokens, -1);
++            kv_prompt_tokens_.assign(tokens_list.begin(), tokens_list.end());
++        }
+     }
+ 
+     llama_batch_free(batch);
+@@ -1295,6 +1356,7 @@ bool LlamaCppTextGeneration::inject_system_prompt(const std::string& prompt) {
+     if (mem) {
+         llama_memory_clear(mem, true);
+     }
++    kv_prompt_tokens_.clear();
+ 
+     const auto tokens = common_tokenize(context_, prompt, true, true);
+     const int n_tokens = static_cast<int>(tokens.size());
+@@ -1504,6 +1566,7 @@ void LlamaCppTextGeneration::clear_context() {
+         if (mem) {
+             llama_memory_clear(mem, true);
+         }
++        kv_prompt_tokens_.clear();
+         RAC_LOG_INFO("LLM.LlamaCpp", "clear_context: KV cache cleared");
+     }
+ }
+@@ -1763,6 +1826,7 @@ bool LlamaCppTextGeneration::remove_lora_adapter(const std::string& adapter_path
+ 
+     // Clear KV cache after adapter changes
+     llama_memory_clear(llama_get_memory(context_), true);
++    kv_prompt_tokens_.clear();
+ 
+     RAC_LOG_INFO("LLM.LlamaCpp", "LoRA adapter removed: %s (%zu remaining)", adapter_path.c_str(),
+                  lora_adapters_.size());
+@@ -1779,6 +1843,7 @@ void LlamaCppTextGeneration::clear_lora_adapters() {
+     if (context_) {
+         llama_set_adapters_lora(context_, nullptr, 0, nullptr);
+         llama_memory_clear(llama_get_memory(context_), true);
++        kv_prompt_tokens_.clear();
+     }
+ 
+     // Release every adapter's underlying llama buffers before clearing the
+diff --git a/engines/llamacpp/llamacpp_backend.h b/engines/llamacpp/llamacpp_backend.h
+index f6c444a18..f58a4c2cf 100644
+--- a/engines/llamacpp/llamacpp_backend.h
++++ b/engines/llamacpp/llamacpp_backend.h
+@@ -258,6 +258,14 @@ class LlamaCppTextGeneration {
+     int64_t cached_seed_ = -1;
+     std::string cached_grammar_ = "\x01";  // sentinel that no real grammar matches
+ 
++    // Prompt tokens currently resident in the KV cache at positions
++    // [0, size), sequence 0. Lets the next generation decode only the part of
++    // its prompt that differs (see generate_stream). Empty means "KV holds
++    // nothing we can trust" — every path that clears or reshapes the cache
++    // must empty this too, or the next generation will reuse positions whose
++    // contents no longer match.
++    std::vector<llama_token> kv_prompt_tokens_;
++
+     bool model_loaded_ = false;
+     std::atomic<bool> cancel_requested_{false};
+     std::atomic<bool> decode_failed_{false};
 diff --git a/engines/llamacpp/rac_backend_llamacpp_register.cpp b/engines/llamacpp/rac_backend_llamacpp_register.cpp
 index e70223de4..bf5169b08 100644
 --- a/engines/llamacpp/rac_backend_llamacpp_register.cpp

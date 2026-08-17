@@ -39,6 +39,27 @@ if ($pkgVersion -ne $sdkVersion) {
   throw "version mismatch: npm package is $pkgVersion, SDK checkout is $sdkVersion. Check out the matching SDK tag."
 }
 
+# Apply the engine patch if the checkout does not already carry it. Without
+# this the build silently produces an UNPATCHED engine: everything succeeds,
+# the app installs, and the only symptom is a 2048-token context in the device
+# log. The patch is the shipping mechanism for these C++ changes — the SDK
+# clone itself is not published.
+$patch = Join-Path $repo 'patches\engine\llamacpp-honour-context-length.patch'
+if (-not (Test-Path $patch)) { throw "patch not found: $patch" }
+
+git -C $SdkRoot apply --reverse --check $patch 2>$null
+if ($LASTEXITCODE -eq 0) {
+  Write-Host "engine patch already applied to $SdkRoot"
+} else {
+  git -C $SdkRoot apply --check $patch 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    throw "cannot apply $patch to $SdkRoot — is the checkout at the version the app depends on ($pkgVersion)?"
+  }
+  git -C $SdkRoot apply $patch
+  if ($LASTEXITCODE -ne 0) { throw "git apply failed" }
+  Write-Host "applied engine patch to $SdkRoot"
+}
+
 $env:ANDROID_NDK_HOME = $Ndk
 $env:PATH = "$CMakeRoot\bin;$env:PATH"
 
