@@ -81,15 +81,33 @@ jobs:
           RAC_ALLOW_NEURT_STUB: '1'
         run: ./sdk/runanywhere-swift/scripts/build-core-xcframework.sh
 
-      - name: Swap it into node_modules
+      # On iOS the SDK forces RAC_STATIC_PLUGINS (commons/CMakeLists.txt:1757),
+      # so engine plugins are linked INTO rac_commons rather than loaded from
+      # the backend framework. The patched llamacpp therefore lives in
+      # RACommons.xcframework — swapping only RABackendLLAMACPP leaves the
+      # unpatched engine in place and adds a second copy of its symbols, which
+      # is how the first attempt died at Ld.
+      #
+      # Every framework this build produced is installed over its published
+      # counterpart, so the whole set stays internally consistent.
+      - name: Swap the built frameworks into node_modules
         run: |
           set -euo pipefail
-          built="sdk/sdk/runanywhere-swift/Binaries/RABackendLLAMACPP.xcframework"
-          dest="app/node_modules/@runanywhere/llamacpp/ios/Binaries/RABackendLLAMACPP.xcframework"
-          test -d "$built" || { echo "patched xcframework not found at $built"; exit 1; }
-          rm -rf "$dest"
-          cp -R "$built" "$dest"
-          ls "$dest"
+          echo "=== built ==="
+          ls sdk/sdk/runanywhere-swift/Binaries/
+          swapped=0
+          for built in sdk/sdk/runanywhere-swift/Binaries/*.xcframework; do
+            name="$(basename "$built")"
+            for dest in app/node_modules/@runanywhere/*/ios/Binaries/"$name"; do
+              [ -d "$dest" ] || continue
+              rm -rf "$dest"
+              cp -R "$built" "$dest"
+              echo "installed $name -> $dest"
+              swapped=$((swapped + 1))
+            done
+          done
+          test "$swapped" -gt 0 || { echo "nothing was swapped"; exit 1; }
+          echo "swapped $swapped framework(s)"
 
       - name: Pod install
         working-directory: app/apps/mobile/ios
