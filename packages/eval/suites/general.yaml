@@ -1,0 +1,146 @@
+# Does the app work for people, or only for the demo?
+#
+# Every scenario here uses `route: true`, so tool exposure and the preamble
+# come from the SHIPPING router — no hand-written tool lists to flatter it.
+# Two kinds of scenario:
+#   1. PARAPHRASE — a demo beat asked in words the beat never used. If a beat
+#      passes and its paraphrase fails, we tuned to the sentence, not the task.
+#   2. UNSEEN — ordinary requests no beat covers.
+# Run: npm run eval -- --suite general --endpoint <url> --model lfm2.5-2.6b
+suite: general
+scenarios:
+  # --- paraphrases: same task, different words ---
+  - id: teach-paraphrase-if-i-ever
+    # The beat says "New rule: when I say ...". This says neither.
+    prompt: If I ever ask for focus mode, dim the screen to 30 percent and turn the flashlight off.
+    route: true
+    expect:
+      calls:
+        - tool: define_macro
+          args: { name: { re: "focus ?mode" } }
+      max_turns: 7
+
+  - id: teach-paraphrase-shortcut
+    prompt: Make me a shortcut called bedtime that sets brightness to 10 and reminds me to charge my phone.
+    route: true
+    expect:
+      calls:
+        - tool: define_macro
+          args: { name: { re: "bedtime" } }
+      max_turns: 7
+
+  - id: defer-paraphrase-at-time
+    # The beat says "in 3 minutes"; DEFERRED_RE only matches in/after + number.
+    prompt: Tonight at 9, check my battery and tell me how it is doing.
+    route: true
+    expect:
+      calls:
+        - tool: schedule_task
+      max_turns: 6
+
+  - id: recall-paraphrase
+    prompt: Remind me what my therapist is called.
+    route: true
+    expect:
+      calls:
+        - tool: recall
+      max_turns: 4
+
+  # --- unseen: ordinary phone requests ---
+  - id: storage-check
+    prompt: How much space have I got left on this phone?
+    route: true
+    expect:
+      calls:
+        - tool: device_info
+      max_turns: 3
+
+  - id: brightness-up
+    prompt: Turn the brightness up to 80 percent.
+    route: true
+    expect:
+      calls:
+        - tool: set_brightness
+      max_turns: 3
+
+  - id: calendar-read-only
+    prompt: What have I got on Friday?
+    route: true
+    expect:
+      calls:
+        - tool: calendar_query
+      max_turns: 4
+
+  - id: alarm-morning
+    prompt: Wake me up at 6:30 tomorrow.
+    route: true
+    expect:
+      calls:
+        - tool: set_alarm
+      max_turns: 4
+
+  - id: open-app
+    prompt: Open Instagram.
+    route: true
+    expect:
+      calls:
+        - tool: open_app
+      max_turns: 3
+
+  - id: music-artist-only
+    prompt: Put on something by Radiohead.
+    route: true
+    expect:
+      calls:
+        - tool: play_music
+      max_turns: 4
+
+  - id: search-no-keyword
+    # Deliberate trap: no "search"/"look up"/"who is" trigger word, so the
+    # keyword router never exposes the web group. A real person asks like this.
+    prompt: Who won the Monaco Grand Prix this year?
+    route: true
+    expect:
+      calls:
+        - tool: web_search
+      max_turns: 4
+
+  - id: timer-cooking
+    prompt: Ping me when 12 minutes are up, the pasta is on.
+    route: true
+    expect:
+      calls:
+        - tool: set_timer
+      max_turns: 4
+
+  - id: text-someone
+    prompt: Let Sam know I am running late.
+    route: true
+    expect:
+      calls:
+        - tool: send_sms
+      max_turns: 4
+
+  - id: memory-write-casual
+    prompt: My wifi password is hunter2, keep that somewhere.
+    route: true
+    expect:
+      calls:
+        - tool: remember
+      max_turns: 4
+
+  # --- must NOT reach for a tool ---
+  - id: plain-question
+    prompt: What is the capital of France?
+    route: true
+    expect:
+      no_calls: true
+      final_contains: ["Paris"]
+      max_turns: 3
+
+  - id: greeting
+    prompt: Morning! How are you doing?
+    route: true
+    expect:
+      no_calls: true
+      max_turns: 3

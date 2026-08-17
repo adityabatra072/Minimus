@@ -24,15 +24,7 @@ import { scheduler } from '../services/scheduler';
 import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
-import {
-  deferredPreamble,
-  deferredToolExclusions,
-  isTeaching,
-  macroSteering,
-  routeToolGroups,
-  teachingPreamble,
-  teachingToolExclusions,
-} from '../services/intent';
+import { composeRun } from '../services/intent';
 import { userExcludedTools, userToolGroups } from '../services/toolPlatform';
 import { ensureVoiceReady, VoicePipeline, type VoiceState } from '../services/voice';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -230,50 +222,16 @@ export default function ChatScreen({
       // Taught phrases have to be visible in the system prompt, or a bare
       // "wind down" reads as small talk instead of a macro invocation.
       const macros = await loadMacros().catch(() => []);
-      const preambleLines = [
-        'You are Minimus, running entirely on this phone. You get things DONE using tools, then confirm briefly.',
-      ];
-      // While TEACHING, the taught-phrases line is poison: it says "call
-      // run_macro for this phrase" while the teaching line says "only
-      // define_macro" — the model acts AND defines across 5-8 turns (rig:
-      // teach-devstate 0/3 with the line, clean without).
-      if (macros.length > 0 && !isTeaching(prompt)) {
-        preambleLines.push(
-          `Phrases the user has taught you (run these with run_macro): ${macros
-            .map((m) => `"${m.name}"`)
-            .join(', ')}. If the user says one of them, call run_macro with that name.`,
-        );
-      }
-      if (origin === 'scheduled') {
-        preambleLines.push(
-          'This is a task you scheduled earlier and it is now due. Carry it out with your tools, then state the outcome in one short sentence.',
-        );
-      }
-      const teaching = teachingPreamble(prompt);
-      if (teaching) preambleLines.push(teaching);
-      const deferred = deferredPreamble(prompt);
-      if (deferred) preambleLines.push(deferred);
-      const macroHit = macroSteering(prompt, macros.map((m) => m.name));
-      if (macroHit) preambleLines.push(macroHit.line);
-      const excludeTools = [
-        ...deferredToolExclusions(prompt),
-        ...teachingToolExclusions(prompt),
-        ...(macroHit?.exclude ?? []),
-        ...userExcludedTools(),
-      ];
-      // User-added tools (custom HTTP, MCP) ride along on every run — the
-      // user opted them in explicitly, and each call is approval-gated.
-      // The vision group exists only while an image is attached.
-      const toolGroups = [
-        ...routeToolGroups(prompt, macros.map((m) => m.name)),
-        ...userToolGroups(),
-        ...(attachment ? ['vision'] : []),
-      ];
-      if (attachment) {
-        preambleLines.push(
-          'The user attached an image to this message. Call describe_image to see it before answering anything about it.',
-        );
-      }
+      // One composition, shared with the headless runner and the eval rig
+      // (agent-core/routing.ts). Inlining it here is what let the rig drift
+      // from the app.
+      const { toolGroups, excludeTools, preamble } = composeRun(prompt, {
+        macroNames: macros.map((m) => m.name),
+        origin: origin === 'scheduled' ? 'scheduled' : 'user',
+        hasAttachment: !!attachment,
+        extraToolGroups: userToolGroups(),
+        extraExcludeTools: userExcludedTools(),
+      });
       diag(`tool groups: ${toolGroups.join(',')}`);
 
       let railId: string | null = null;
@@ -327,7 +285,7 @@ export default function ChatScreen({
           tools: registry,
           toolGroups,
           excludeTools,
-          preamble: preambleLines.join('\n'),
+          preamble,
           // Settings can waive approval prompts; denial stays the default
           // for anything that sends on the user's behalf.
           approvals: requireApprovals ? (req) => askApproval(req.call) : async () => true,

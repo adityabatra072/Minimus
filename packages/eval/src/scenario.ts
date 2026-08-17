@@ -35,6 +35,15 @@ export interface ScenarioExpectation {
 export interface Scenario {
   id: string;
   prompt: string;
+  /**
+   * Derive tool exposure, exclusions and preamble from the SHIPPING router
+   * (agent-core composeRun) instead of the hand-written fields below. Prefer
+   * this: fields written by hand test the agent we remember writing, and they
+   * silently rot when the router changes. `macros` supplies the taught phrases
+   * that would be in the user's store at that moment.
+   */
+  route?: boolean;
+  macros?: string[];
   tools?: string[];
   /**
    * Extra system-prompt context the app would inject at this point (e.g. the

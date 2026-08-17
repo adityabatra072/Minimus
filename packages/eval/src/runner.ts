@@ -1,5 +1,6 @@
 import {
   AgentLoop,
+  composeRun,
   policyFor,
   type AgentEvent,
   type ModelAdapter,
@@ -46,6 +47,11 @@ export async function runScenario(
   options: RunSuiteOptions,
 ): Promise<ScenarioResult> {
   const { registry, recorded } = buildMockTools(scenario.tool_results ?? {});
+  // `route: true` runs the app's own composition, so a routing change that
+  // breaks a real request shows up here instead of in a demo.
+  const routed = scenario.route
+    ? composeRun(scenario.prompt, { macroNames: scenario.macros ?? [] })
+    : null;
   const loop = new AgentLoop();
   const events: AgentEvent[] = [];
   const started = Date.now();
@@ -58,9 +64,17 @@ export async function runScenario(
     tools: registry,
     approvals: async () => options.autoApprove !== false,
     ...(options.policy ? { policy: options.policy } : {}),
-    ...(scenario.tools ? { toolGroups: scenario.tools } : {}),
-    ...(scenario.exclude_tools ? { excludeTools: scenario.exclude_tools } : {}),
-    ...(scenario.preamble ? { preamble: scenario.preamble } : {}),
+    ...(routed
+      ? {
+          toolGroups: routed.toolGroups,
+          excludeTools: routed.excludeTools,
+          preamble: routed.preamble,
+        }
+      : {
+          ...(scenario.tools ? { toolGroups: scenario.tools } : {}),
+          ...(scenario.exclude_tools ? { excludeTools: scenario.exclude_tools } : {}),
+          ...(scenario.preamble ? { preamble: scenario.preamble } : {}),
+        }),
   };
   for await (const ev of loop.run(scenario.prompt, runConfig)) {
     events.push(ev);

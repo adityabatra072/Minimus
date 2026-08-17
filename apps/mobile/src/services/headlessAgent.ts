@@ -4,14 +4,7 @@ import { getToolRegistry } from '../tools';
 import { loadMacros } from '../tools/macroTools';
 import { useModelStore } from '../stores/modelStore';
 import { diag } from './diag';
-import {
-  deferredPreamble,
-  deferredToolExclusions,
-  isTeaching,
-  macroSteering,
-  routeToolGroups,
-  teachingToolExclusions,
-} from './intent';
+import { composeRun } from './intent';
 import { userExcludedTools, userToolGroups } from './toolPlatform';
 
 /**
@@ -28,35 +21,22 @@ import { userExcludedTools, userToolGroups } from './toolPlatform';
 export async function runAgentHeadless(instruction: string): Promise<string> {
   const modelId = useModelStore.getState().activeModelId;
   const macros = await loadMacros().catch(() => []);
-  const macroHit = macroSteering(instruction, macros.map((m) => m.name));
-  const preamble = [
-    'You are Minimus, running entirely on this phone.',
-    macros.length > 0 && !isTeaching(instruction)
-      ? `Phrases the user has taught you (run these with run_macro): ${macros
-          .map((m) => `"${m.name}"`)
-          .join(', ')}.`
-      : '',
-    'This is a task you scheduled earlier and it is now due. Carry it out with your tools, then state the outcome in one short sentence.',
-    // A scheduled task can itself defer again ("check once more in 10 min") —
-    // keep the same steering the foreground screens get.
-    deferredPreamble(instruction) ?? '',
-    macroHit?.line ?? '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  // Same composition the chat screen uses (agent-core/routing.ts): a
+  // scheduled run is the same agent, and it can itself defer again.
+  const { toolGroups, excludeTools, preamble } = composeRun(instruction, {
+    macroNames: macros.map((m) => m.name),
+    origin: 'scheduled',
+    extraToolGroups: userToolGroups(),
+    extraExcludeTools: userExcludedTools(),
+  });
 
   diag(`headless run start: ${JSON.stringify(instruction.slice(0, 90))}`);
   let finalText = '';
   for await (const ev of new AgentLoop().run(instruction, {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
-    toolGroups: [...routeToolGroups(instruction, macros.map((m) => m.name)), ...userToolGroups()],
-    excludeTools: [
-      ...deferredToolExclusions(instruction),
-      ...teachingToolExclusions(instruction),
-      ...(macroHit?.exclude ?? []),
-      ...userExcludedTools(),
-    ],
+    toolGroups,
+    excludeTools,
     preamble,
     approvals: async () => false,
   })) {

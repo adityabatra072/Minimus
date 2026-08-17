@@ -1,0 +1,27 @@
+diff --git a/engines/llamacpp/llamacpp_backend.cpp b/engines/llamacpp/llamacpp_backend.cpp
+index 07124b24b..64e43fdb9 100644
+--- a/engines/llamacpp/llamacpp_backend.cpp
++++ b/engines/llamacpp/llamacpp_backend.cpp
+@@ -406,9 +406,22 @@ bool LlamaCppTextGeneration::load_model(const std::string& model_path,
+     if (config.contains("context_size")) {
+         user_context_size = config["context_size"].get<int>();
+     }
++    // commons' load_options_json() emits "context_length" for the v4 load knob
++    // (ModelLoadRequest.context_length); nothing on that path ever writes
++    // "context_size", so a caller-requested context window was silently
++    // dropped and every model loaded at the default cap.
++    if (config.contains("context_length")) {
++        user_context_size = config["context_length"].get<int>();
++    }
+     if (config.contains("max_context_size")) {
+         max_default_context_ = config["max_context_size"].get<int>();
+     }
++    // The final size is min{fitted, train, cap}. Without this an explicit
++    // request could only ever LOWER the window: asking for 8192 on a device
++    // that fits 4096 still yielded the 2048 default cap.
++    if (user_context_size > max_default_context_) {
++        max_default_context_ = user_context_size;
++    }
+ 
+     model_config_ = config;
+     model_path_ = resolved_path;

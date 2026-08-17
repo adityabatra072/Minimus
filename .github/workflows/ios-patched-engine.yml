@@ -1,0 +1,116 @@
+name: ios-patched-engine
+
+# Builds an IPA against a PATCHED llama.cpp engine instead of the published
+# binary, so iOS gets the same context window Android gets from
+# tools/engine/build-android-engine.ps1.
+#
+# Why a whole job for two lines of C++: the engine ships as a prebuilt
+# xcframework inside @runanywhere/llamacpp, and Apple's toolchain only exists
+# on macOS. This is the macOS box we already rent to build the app at all.
+#
+# Manual only — it is far slower than ios-build.yml, which stays the default
+# for JS and app changes.
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_ref:
+        description: SDK commit to build (must match the installed npm package version)
+        required: true
+        default: 538db195076e5a7305a517005dbd32309a4ee43e
+
+concurrency:
+  group: ios-patched-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Check out the SDK at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: RunanywhereAI/runanywhere-sdks
+          ref: ${{ inputs.sdk_ref }}
+          path: sdk
+
+      - name: Apply the context-length patch
+        working-directory: sdk
+        run: |
+          git apply --verbose ../app/patches/engine/llamacpp-honour-context-length.patch
+          git diff --stat
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install workspace dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build workspace packages
+        working-directory: app
+        run: npm run build -w @minimus/agent-core
+
+      # Only the llamacpp framework is replaced, so every other backend stays
+      # the published binary. Building them here would add an hour and pull
+      # third-party archives we do not touch.
+      - name: Build the patched llamacpp xcframework
+        working-directory: sdk
+        env:
+          RAC_BACKEND_ONNX: 'OFF'
+          RAC_BACKEND_SHERPA: 'OFF'
+          RAC_BACKEND_NEURT: 'OFF'
+          RAC_BACKEND_MLX: 'OFF'
+        run: ./sdk/runanywhere-swift/scripts/build-core-xcframework.sh
+
+      - name: Swap it into node_modules
+        run: |
+          set -euo pipefail
+          built="sdk/sdk/runanywhere-swift/Binaries/RABackendLLAMACPP.xcframework"
+          dest="app/node_modules/@runanywhere/llamacpp/ios/Binaries/RABackendLLAMACPP.xcframework"
+          test -d "$built" || { echo "patched xcframework not found at $built"; exit 1; }
+          rm -rf "$dest"
+          cp -R "$built" "$dest"
+          ls "$dest"
+
+      - name: Pod install
+        working-directory: app/apps/mobile/ios
+        run: pod install --repo-update
+
+      - name: Build (Release, unsigned)
+        working-directory: app/apps/mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace mobile.xcworkspace \
+            -scheme mobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            build | xcbeautify --renderer github-actions
+
+      - name: Package unsigned IPA
+        working-directory: app/apps/mobile/ios
+        run: |
+          set -euo pipefail
+          appdir="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$appdir" || { echo "no .app produced"; exit 1; }
+          rm -rf Payload && mkdir Payload
+          cp -R "$appdir" Payload/
+          zip -qry minimus-ios-unsigned.ipa Payload
+          ls -la minimus-ios-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minimus-ios-patched-engine
+          path: app/apps/mobile/ios/minimus-ios-unsigned.ipa
+          if-no-files-found: error

@@ -3,6 +3,7 @@ export * from './tools.js';
 export * from './parsing.js';
 export * from './prompts.js';
 export * from './policy.js';
+export * from './routing.js';
 export * from './adapter.js';
 export * from './loop.js';
 export { OpenAIAdapter, type OpenAIAdapterConfig } from './adapters/openai.js';
