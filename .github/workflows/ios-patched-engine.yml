@@ -17,6 +17,13 @@ on:
         description: SDK commit to build (must match the installed npm package version)
         required: true
         default: 538db195076e5a7305a517005dbd32309a4ee43e
+      frameworks_run_id:
+        description: >-
+          Reuse the frameworks built by an earlier run of this workflow instead
+          of rebuilding them (the engine build is ~80 minutes and only changes
+          when the patch does). Leave empty to build from source.
+        required: false
+        default: ''
 
 concurrency:
   group: ios-patched-engine-${{ github.ref }}
@@ -32,6 +39,7 @@ jobs:
           path: app
 
       - name: Check out the SDK at the pinned commit
+        if: inputs.frameworks_run_id == ''
         uses: actions/checkout@v4
         with:
           repository: RunanywhereAI/runanywhere-sdks
@@ -39,10 +47,22 @@ jobs:
           path: sdk
 
       - name: Apply the context-length patch
+        if: inputs.frameworks_run_id == ''
         working-directory: sdk
         run: |
           git apply --verbose ../app/patches/engine/llamacpp-honour-context-length.patch
           git diff --stat
+
+      # The engine only changes when the patch does, so an IPA rebuild for a
+      # JS change should not pay 80 minutes of C++.
+      - name: Reuse frameworks from an earlier run
+        if: inputs.frameworks_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: runanywhere-patched-xcframeworks
+          path: sdk/sdk/runanywhere-swift/Binaries
+          run-id: ${{ inputs.frameworks_run_id }}
+          github-token: ${{ github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -62,9 +82,11 @@ jobs:
       # llamacpp slice is actually installed below; the rest are built and
       # thrown away. Steps mirror the SDK's own ios/swift-spm CI jobs.
       - name: Install build tools
+        if: inputs.frameworks_run_id == ''
         run: brew install protobuf ninja
 
       - name: Download vendored ONNX Runtime and Sherpa (iOS + macOS)
+        if: inputs.frameworks_run_id == ''
         working-directory: sdk
         run: |
           bash sdk/runanywhere-commons/scripts/ios/download-onnx.sh
@@ -72,6 +94,7 @@ jobs:
           bash sdk/runanywhere-commons/scripts/macos/download-sherpa-onnx.sh
 
       - name: Build the patched llamacpp xcframework
+        if: inputs.frameworks_run_id == ''
         working-directory: sdk
         env:
           # NeuRT (Apple ANE) lives in a private sibling repo. Without it the
@@ -116,6 +139,7 @@ jobs:
           find sdk/sdk/runanywhere-swift/Binaries/RACommons.xcframework -maxdepth 2 | head -20
 
       - name: Upload the built frameworks
+        if: inputs.frameworks_run_id == ''
         uses: actions/upload-artifact@v4
         with:
           name: runanywhere-patched-xcframeworks
