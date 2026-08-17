@@ -35,7 +35,20 @@ export const DEFAULT_POLICIES: ModelPolicy[] = [
     topP: 0.95,
     thinking: true,
     contextWindowTokens: 32768,
-    maxOutputTokens: 2048,
+    // 2048 was never the binding limit: a 2048-token CONTEXT left roughly a
+    // thousand tokens for output, so deliberation was cut off by the window
+    // and the cap never bit. Doubling the window removed that accidental
+    // brake, and the first long run showed what was underneath — a single
+    // turn of `thought=8951ch text=0ch`, 2044 events, running the cap to the
+    // end and producing no answer at 5 tokens/sec. That is seven minutes
+    // spent on nothing.
+    //
+    // 896 is sized off what a real turn needs: the widest tool call observed
+    // (define_macro with three steps) is around 120 tokens, and the answers
+    // are two sentences. A turn that wants more than this is spiralling, and
+    // the loop already recovers — it frees budget and re-asks, and a call cut
+    // mid-emission is salvaged by the parser.
+    maxOutputTokens: 896,
     toolResultCharCap: 6000,
   },
   {
