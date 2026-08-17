@@ -77,6 +77,37 @@ class MinimusToolsModule(private val ctx: ReactApplicationContext) :
         }
     }
 
+    // ---------------------------------------------------------- keep awake
+    /**
+     * Hold the screen on while the agent is working.
+     *
+     * A run here is minutes, not milliseconds, and the phone's own screen
+     * timeout does not care: mid-QA the device locked during a beat, the run
+     * stopped, and the only evidence was the battery cooling from 47C to 30C
+     * with no further output. Anything the user starts and then watches has to
+     * outlive the lock screen.
+     */
+    @ReactMethod
+    fun setKeepAwake(on: Boolean, promise: Promise) {
+        val activity = ctx.currentActivity
+        if (activity == null) {
+            promise.reject("no_activity", "App is not in the foreground.")
+            return
+        }
+        activity.runOnUiThread {
+            try {
+                if (on) {
+                    activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                promise.resolve(null)
+            } catch (e: Exception) {
+                promise.reject("keep_awake_failed", "Could not hold the screen on: ${e.message}")
+            }
+        }
+    }
+
     // ---------------------------------------------------------- alarm/timer
     @ReactMethod
     fun setAlarm(hour: Int, minute: Int, label: String?, promise: Promise) {

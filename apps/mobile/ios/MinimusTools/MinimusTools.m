@@ -90,6 +90,25 @@ RCT_EXPORT_METHOD(setBrightness:(double)level
   });
 }
 
+// ------------------------------------------------------------- keep awake
+
+/**
+ * Hold the screen on while the agent is working.
+ *
+ * A run is minutes, not milliseconds. During QA an Android device locked
+ * mid-beat and the run simply stopped; the only evidence was the battery
+ * cooling with no further output. iOS idles out the same way.
+ */
+RCT_EXPORT_METHOD(setKeepAwake:(BOOL)on
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [UIApplication sharedApplication].idleTimerDisabled = on;
+    resolve(nil);
+  });
+}
+
 // ---------------------------------------------------------- notifications
 
 - (void)withNotificationAuth:(RCTPromiseRejectBlock)reject
