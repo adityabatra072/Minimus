@@ -1,8 +1,8 @@
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { parseAssistantOutput, buildSystemPrompt, policyFor } from '@minimus/agent-core';
+import { parseAssistantOutput, buildSystemPrompt, policyFor, ALL_TOOL_GROUPS } from '@minimus/agent-core';
 import { getToolRegistry } from '../tools';
-import { routeToolGroups, teachingPreamble, deferredToolExclusions } from './intent';
+import { composeRun, teachingPreamble, deferredToolExclusions } from './intent';
 import { parseWhen } from './scheduler';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToolStore } from '../stores/toolStore';
@@ -61,37 +61,41 @@ function checkRegistry(): string {
 function checkPromptBudget(): string {
   const registry = getToolRegistry();
   const policy = policyFor('lfm2.5-2.6b');
-  const worst = ['core', 'device', 'schedule', 'web', 'music', 'comms'];
-  const prompt = buildSystemPrompt(registry.list(worst), {
+  const prompt = buildSystemPrompt(registry.list(ALL_TOOL_GROUPS), {
     format: policy.format,
     oneToolPerTurn: policy.oneToolPerTurn,
     preamble: 'You are Minimus, running entirely on this phone.',
   });
   const approxTokens = Math.ceil(prompt.length / 4);
   // Every token here is a token the model cannot spend thinking, and prefill
-  // is re-paid every turn. 1200 is the line where deliberation gets tight.
-  if (approxTokens > 1200) {
-    throw new Error(`widest tool set costs ~${approxTokens} tokens (budget 1200)`);
+  // is re-paid every turn. The window is 4096 once the engine honours the
+  // requested context (docs/SDK-FINDINGS.md ss5); half of it for the tool set
+  // is the line where deliberation gets tight.
+  if (approxTokens > 2048) {
+    throw new Error(`full tool set costs ~${approxTokens} tokens (budget 2048 of a 4096 window)`);
   }
-  return `widest routed prompt ~${approxTokens} tokens`;
+  return `full tool set ~${approxTokens} tokens of a 4096 window`;
 }
 
 function checkRouting(): string {
-  const cases: [string, string[], string[]][] = [
-    // prompt, must include, must NOT include
-    ['turn on the flashlight', ['device'], ['web', 'music', 'core']],
-    ["look at tomorrow, find me 90 minutes for the gym", ['schedule'], ['core', 'music']],
-    ['play Janice STFU on Spotify', ['music'], ['schedule']],
-    ['what did I tell you about Thursday?', ['core'], ['music']],
-    ['email Priya about the deck', ['comms'], ['music']],
+  // What matters is that the model SEES the tool a request needs. Keyword
+  // routing used to decide that from the user's wording and got it wrong on 7
+  // of 16 ordinary requests, so the shipping composition exposes everything;
+  // these cases assert the exposure, not the guesswork.
+  const cases: [string, string[]][] = [
+    ['turn on the flashlight', ['device']],
+    ['look at tomorrow, find me 90 minutes for the gym', ['schedule']],
+    ['how much space have I got left on this phone?', ['device']],
+    ['who won the Monaco Grand Prix this year?', ['web']],
+    ['let Sam know I am running late', ['comms']],
+    ['what did I tell you about Thursday?', ['core']],
   ];
-  for (const [prompt, must, mustNot] of cases) {
-    const groups = routeToolGroups(prompt);
+  for (const [prompt, must] of cases) {
+    const { toolGroups } = composeRun(prompt);
     for (const g of must) {
-      if (!groups.includes(g)) throw new Error(`"${prompt}" lost group ${g} (got ${groups.join(',')})`);
-    }
-    for (const g of mustNot) {
-      if (groups.includes(g)) throw new Error(`"${prompt}" pulled in ${g} (got ${groups.join(',')})`);
+      if (!toolGroups.includes(g)) {
+        throw new Error(`"${prompt}" never saw group ${g} (got ${toolGroups.join(',')})`);
+      }
     }
   }
   if (!teachingPreamble('New rule: when I say wind down, dim the screen')) {
