@@ -108,6 +108,20 @@ jobs:
           done
           test "$swapped" -gt 0 || { echo "nothing was swapped"; exit 1; }
           echo "swapped $swapped framework(s)"
+          # The first attempt with this swap failed at "Build input file cannot
+          # be found: XCFrameworkIntermediates/RunAnywhereCore/librac_commons.a"
+          # even though CocoaPods logged copying the ios-arm64 slice, so the
+          # slice layout is what to look at.
+          echo "=== built RACommons layout ==="
+          find sdk/sdk/runanywhere-swift/Binaries/RACommons.xcframework -maxdepth 2 | head -20
+
+      - name: Upload the built frameworks
+        uses: actions/upload-artifact@v4
+        with:
+          name: runanywhere-patched-xcframeworks
+          path: sdk/sdk/runanywhere-swift/Binaries/
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Pod install
         working-directory: app/apps/mobile/ios
