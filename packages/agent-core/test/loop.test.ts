@@ -94,6 +94,33 @@ describe('AgentLoop', () => {
     expect(lastRequest.at(-1)?.content).toContain('Continue NOW');
   });
 
+  it('completes (not errors) when tools succeeded but the summary spiralled', async () => {
+    const { tools, log } = makeTools();
+    // Device case: the tool call landed, then every wrap-up turn was thinking
+    // with no answer. The work happened; the run must not be reported as a
+    // failure.
+    const adapter = new MockAdapter([
+      '[flashlight(on=True)]',
+      '<think>let me reconsider</think>',
+      '<think>still reconsidering</think>',
+      '<think>and again</think>',
+    ]);
+    const events = await collect(new AgentLoop().run('flashlight on', { adapter, tools }));
+    expect(log).toEqual(['flashlight:true']);
+    expect(finished(events).reason).toBe('completed');
+  });
+
+  it('still errors when nothing succeeded and the model only thinks', async () => {
+    const { tools } = makeTools();
+    const adapter = new MockAdapter([
+      '<think>hmm</think>',
+      '<think>hmm again</think>',
+      '<think>and again</think>',
+    ]);
+    const events = await collect(new AgentLoop().run('do something', { adapter, tools }));
+    expect(finished(events).reason).toBe('error');
+  });
+
   it('suppresses thinking on the attempt after a thinking overrun', async () => {
     const { tools } = makeTools();
     const seenOptions: boolean[] = [];

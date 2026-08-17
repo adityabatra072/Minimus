@@ -151,6 +151,8 @@ export class AgentLoop {
     let streakNudged = false;
     let emptyAnswerNudges = 0;
     let suppressThinkingNextTurn = false;
+    /** Side effects that actually landed — the run's real output. */
+    let toolsSucceeded = 0;
     // Two chances, not one: on-device the model can emit consecutive silent
     // turns mid-task (think-then-EOS), and a single nudge left a calendar
     // booking half-done on a live demo take.
@@ -245,11 +247,21 @@ export class AgentLoop {
       if (parsed.calls.length === 0 && parsed.text === '' && parsed.reasoning !== '') {
         parseRetriesThisTurn++;
         if (parseRetriesThisTurn > maxParseRetries) {
+          // The work is not the sentence. A run whose tools all succeeded and
+          // then lost its closing summary to a spiral has still done what the
+          // user asked (device evidence: device_info + remember +
+          // schedule_task all correct, run reported as an error). Report it as
+          // completed and let the UI name the last operation; only a run that
+          // achieved nothing is an error.
           yield {
             type: 'run_finished',
-            reason: 'error',
-            finalText,
-            error: 'model produced only thinking output, no answer, after retries',
+            ...(toolsSucceeded > 0
+              ? { reason: 'completed' as const, finalText }
+              : {
+                  reason: 'error' as const,
+                  finalText,
+                  error: 'model produced only thinking output, no answer, after retries',
+                }),
           };
           return;
         }
@@ -421,7 +433,10 @@ export class AgentLoop {
           config.signal?.removeEventListener('abort', onAbort);
         }
         resultText = capToolResult(resultText, policy.toolResultCharCap);
-        if (!isError) executedCalls.set(callKey, resultText);
+        if (!isError) {
+          executedCalls.set(callKey, resultText);
+          toolsSucceeded++;
+        }
         messages.push({
           role: 'tool',
           toolCallId: call.id,
