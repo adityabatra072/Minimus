@@ -31,6 +31,8 @@ interface SessionState {
   activeSessionId: string;
   hydrate: () => Promise<void>;
   newSession: () => string;
+  /** Switch to a saved conversation and remember it across launches. */
+  openSession: (id: string) => void;
   deleteSession: (id: string) => void;
   /** Append messages to the active session and persist. */
   appendToActive: (messages: SessionMessage[]) => void;
@@ -38,6 +40,7 @@ interface SessionState {
 }
 
 const INDEX_KEY = 'minimus.sessions.index';
+const ACTIVE_KEY = 'minimus.sessions.active';
 const transcriptKey = (id: string) => `minimus.sessions.${id}`;
 const MAX_SESSIONS = 50;
 
@@ -53,19 +56,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   hydrate: async () => {
     const raw = await AsyncStorage.getItem(INDEX_KEY).catch(() => null);
-    if (!raw) return;
-    try {
-      const sessions = JSON.parse(raw) as SessionMeta[];
-      set({ sessions });
-    } catch {
-      /* corrupt index — start fresh, transcripts stay recoverable by key */
+    if (raw) {
+      try {
+        set({ sessions: JSON.parse(raw) as SessionMeta[] });
+      } catch {
+        /* corrupt index — start fresh, transcripts stay recoverable by key */
+      }
+    }
+    // Reopen the conversation the user was last in. Without this every launch
+    // landed on an empty chat and the previous one could only be found through
+    // the history screen, which reads as "the app forgot".
+    const active = await AsyncStorage.getItem(ACTIVE_KEY).catch(() => null);
+    if (active && get().sessions.some((s) => s.id === active)) {
+      set({ activeSessionId: active });
     }
   },
 
   newSession: () => {
     const id = newId();
     set({ activeSessionId: id });
+    AsyncStorage.setItem(ACTIVE_KEY, id).catch(() => undefined);
     return id;
+  },
+
+  openSession: (id: string) => {
+    set({ activeSessionId: id });
+    AsyncStorage.setItem(ACTIVE_KEY, id).catch(() => undefined);
   },
 
   deleteSession: (id: string) => {
@@ -97,6 +113,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
     set({ sessions: next });
     void saveIndex(next);
+    AsyncStorage.setItem(ACTIVE_KEY, activeSessionId).catch(() => undefined);
     void (async () => {
       const raw = await AsyncStorage.getItem(transcriptKey(activeSessionId)).catch(() => null);
       let transcript: SessionMessage[] = [];

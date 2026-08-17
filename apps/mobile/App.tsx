@@ -90,7 +90,7 @@ export default function App(): React.JSX.Element {
             <HistoryScreen
               onClose={() => setOverlayScreen('none')}
               onPick={(id) => {
-                useSessionStore.setState({ activeSessionId: id });
+                useSessionStore.getState().openSession(id);
                 setOverlayScreen('none');
               }}
             />
