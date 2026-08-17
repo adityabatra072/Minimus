@@ -23,6 +23,29 @@ Three layers, because they fail differently:
 All three are covered by the shareable report ("share report" next to the
 tally).
 
+## The fourth layer: does it work for anyone but us
+
+Beats are the demo script. Passing them says nothing about the sentence a real
+person types, and it is easy to tune a harness until it fits its own tests. Two
+things guard against that, both on a laptop, no device required:
+
+```sh
+npx tsx packages/eval/src/routingCheck.ts general   # every needed tool exposed?
+npm run eval -- --suite general --endpoint <url> --model lfm2.5-2.6b
+```
+
+`suites/general.yaml` is deliberately not the demo: paraphrases of each beat in
+words the beat never used ("If I ever ask for focus mode…" for the teach beat),
+plus ordinary requests no beat covers, plus two that must call NO tool. Every
+scenario sets `route: true`, so it runs the shipping composition
+(`composeRun`), not a hand-written tool list — a rig that restates the routing
+in YAML is measuring the agent you remember writing.
+
+`routingCheck` answers the cheaper half without a model: was the tool the task
+needs even exposed? A model cannot call a tool it was never given, and that
+failure looks exactly like a model failure in the logs. It found 7 of 16
+ordinary requests were unwinnable before the exposure change.
+
 ## Before a run
 
 - Model downloaded and loaded (open the app once and let it settle)
