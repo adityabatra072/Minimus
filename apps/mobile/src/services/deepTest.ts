@@ -192,24 +192,39 @@ async function checkVoiceRoundTrip(): Promise<string> {
   const phrase = 'turn on the flashlight';
   const audio = await RunAnywhere.tts.synthesize(phrase);
   if (!audio.data || audio.data.length < 1000) throw new Error('TTS produced no audio');
-  // Piper synthesizes at its own rate (22.05kHz); Whisper expects 16kHz and
-  // does not resample, so feeding it the raw buffer transcribes gibberish
-  // ("(wind)" from "turn on the flashlight"). The live mic path already
-  // captures at 16kHz — this only bridges the synthetic round trip.
-  const source = new Int16Array(
-    audio.data.buffer,
-    audio.data.byteOffset,
-    Math.floor(audio.data.byteLength / 2),
-  );
-  const ratio = (audio.sampleRate || 22050) / 16000;
-  const resampled = new Int16Array(Math.floor(source.length / ratio));
-  for (let i = 0; i < resampled.length; i++) resampled[i] = source[Math.floor(i * ratio)] ?? 0;
-  const transcription = await RunAnywhere.stt.transcribe(
-    AudioInputs.pcm16(new Uint8Array(resampled.buffer), 16000),
-  );
+  // What TTS hands back is not necessarily raw samples: a WAV container's
+  // 44-byte header read as PCM is why this first transcribed "(wind)" and
+  // then "(static)". Detect the container, and only hand-resample when the
+  // buffer really is bare PCM (Piper runs at 22.05kHz, Whisper wants 16kHz).
+  const isRiff =
+    audio.data.length > 12 &&
+    audio.data[0] === 0x52 &&
+    audio.data[1] === 0x49 &&
+    audio.data[2] === 0x46 &&
+    audio.data[3] === 0x46;
+  let input;
+  if (isRiff) {
+    input = AudioInputs.wav(audio.data, audio.sampleRate || 22050);
+  } else {
+    const source = new Int16Array(
+      audio.data.buffer,
+      audio.data.byteOffset,
+      Math.floor(audio.data.byteLength / 2),
+    );
+    const ratio = (audio.sampleRate || 22050) / 16000;
+    const resampled = new Int16Array(Math.floor(source.length / ratio));
+    for (let i = 0; i < resampled.length; i++) resampled[i] = source[Math.floor(i * ratio)] ?? 0;
+    input = AudioInputs.pcm16(new Uint8Array(resampled.buffer), 16000);
+  }
+  const transcription = await RunAnywhere.stt.transcribe(input);
   const heard = transcription.text.toLowerCase();
   const hit = ['flashlight', 'flash light', 'turn on'].some((w) => heard.includes(w));
-  if (!hit) throw new Error(`STT heard "${transcription.text.slice(0, 60)}" from "${phrase}"`);
+  if (!hit) {
+    throw new Error(
+      `STT heard "${transcription.text.slice(0, 40)}" from "${phrase}" ` +
+        `(${audio.format ?? 'unknown format'}, ${audio.sampleRate}Hz, ${audio.data.length}B, riff=${isRiff})`,
+    );
+  }
   return `spoke and heard back "${transcription.text.trim().slice(0, 40)}"`;
 }
 
