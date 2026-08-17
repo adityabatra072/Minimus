@@ -192,8 +192,20 @@ async function checkVoiceRoundTrip(): Promise<string> {
   const phrase = 'turn on the flashlight';
   const audio = await RunAnywhere.tts.synthesize(phrase);
   if (!audio.data || audio.data.length < 1000) throw new Error('TTS produced no audio');
+  // Piper synthesizes at its own rate (22.05kHz); Whisper expects 16kHz and
+  // does not resample, so feeding it the raw buffer transcribes gibberish
+  // ("(wind)" from "turn on the flashlight"). The live mic path already
+  // captures at 16kHz — this only bridges the synthetic round trip.
+  const source = new Int16Array(
+    audio.data.buffer,
+    audio.data.byteOffset,
+    Math.floor(audio.data.byteLength / 2),
+  );
+  const ratio = (audio.sampleRate || 22050) / 16000;
+  const resampled = new Int16Array(Math.floor(source.length / ratio));
+  for (let i = 0; i < resampled.length; i++) resampled[i] = source[Math.floor(i * ratio)] ?? 0;
   const transcription = await RunAnywhere.stt.transcribe(
-    AudioInputs.pcm16(audio.data, audio.sampleRate ?? 22050),
+    AudioInputs.pcm16(new Uint8Array(resampled.buffer), 16000),
   );
   const heard = transcription.text.toLowerCase();
   const hit = ['flashlight', 'flash light', 'turn on'].some((w) => heard.includes(w));

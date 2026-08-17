@@ -259,6 +259,13 @@ export class AgentLoop {
           content:
             'You ran out of space thinking. Decide NOW: reply with the single tool call or the short final answer. Keep thinking to one sentence.',
         });
+        // An overrun means prompt + thinking exceeded the context window, so
+        // asking again in the same space just repeats it (observed on device:
+        // 3684 characters of thinking, then 59, then nothing). Free real room
+        // by eliding the oldest tool results — the model keeps the recent
+        // turns it actually needs.
+        const elided = compact(messages, 4);
+        if (elided > 0) yield { type: 'compaction', droppedMessages: elided };
         suppressThinkingNextTurn = true;
         yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: 'thinking overrun' };
         yield { type: 'turn_finished', turn };
