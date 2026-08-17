@@ -30,10 +30,27 @@ full prompt every turn and pay complete prefill each time: 10 to 30 seconds
 per turn on a phone for a ~1k-token prompt that is 95 percent identical to the
 previous turn's.
 
-- Suggested fix: common-prefix detection against the previous request (the
-  llama-server `cache_prompt` approach): keep the KV for the shared prefix,
-  decode only the suffix. This is the single biggest latency lever for agentic
-  use.
+- Fix: implemented in `patches/engine/llamacpp-honour-context-length.patch` —
+  the backend remembers the prompt tokens resident in the KV, compares them
+  against the next prompt, drops the divergent suffix with
+  `llama_memory_seq_rm`, and decodes only what changed.
+- **It works, and it does not help the model this app ships.** Measured on a
+  OnePlus 9R: `processing 1375 prompt tokens (1320 reused from cache, 55 to
+  decode)` — 96% of prefill skipped — immediately followed by `llama_decode
+  failed for prompt chunk [1320..1375)`. LFM2.5 is a HYBRID model (its load
+  log shows `llama_memory_recurrent` and Gated Delta Net layers), and
+  recurrent state cannot be rewound to an arbitrary position. `llama.h` says
+  so at the declaration: "Returns false if a partial sequence cannot be
+  removed." Prefix reuse is an attention-cache trick.
+- The patch therefore checks that return value and falls back to a full
+  decode, logging "Prefix reuse unavailable for this model". Pure-attention
+  models (Qwen3.5 and friends) get the saving; LFM2.5 behaves exactly as it
+  did before.
+- So this is NOT the biggest latency lever for a hybrid model, which is worth
+  correcting: for LFM2.5 on mid-range Android the remaining levers are a
+  smaller model, a GPU/NPU backend, or better hardware. Upstream could still
+  offer state save/restore per sequence, which recurrent models can support,
+  as an alternative to positional rewind.
 
 ## 3. LFM2.5 chat template is unknown to llama_chat_apply_template
 

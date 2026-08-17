@@ -1,5 +1,5 @@
 diff --git a/engines/llamacpp/llamacpp_backend.cpp b/engines/llamacpp/llamacpp_backend.cpp
-index 07124b24b..8b0e81099 100644
+index 07124b24b..474b2d2f7 100644
 --- a/engines/llamacpp/llamacpp_backend.cpp
 +++ b/engines/llamacpp/llamacpp_backend.cpp
 @@ -406,9 +406,22 @@ bool LlamaCppTextGeneration::load_model(const std::string& model_path,
@@ -59,7 +59,7 @@ index 07124b24b..8b0e81099 100644
  
      // Honor the per-request thread hint (idl/llm_options.proto:119).
      // 0 = backend default (the model-load thread count already on the context).
-@@ -1175,13 +1197,36 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+@@ -1175,13 +1197,45 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
      RAC_LOG_INFO("LLM.LlamaCpp", "Generation: prompt_tokens=%d, max_tokens=%d, context=%d",
                   prompt_tokens, effective_max_tokens, n_ctx);
  
@@ -74,11 +74,20 @@ index 07124b24b..8b0e81099 100644
 +        while (n_reuse < reusable && kv_prompt_tokens_[n_reuse] == tokens_list[n_reuse]) {
 +            ++n_reuse;
 +        }
-+        if (n_reuse > 0) {
-+            // Drop everything after the shared prefix so the positions we are
-+            // about to write are free.
-+            llama_memory_seq_rm(mem, 0, n_reuse, -1);
-+        } else {
++        // Rewinding to a position is an attention-cache trick. A recurrent or
++        // hybrid model (LFM2.5 is hybrid — Gated Delta Net layers) carries
++        // state that cannot be rolled back to an arbitrary point, and
++        // llama_memory_seq_rm says so by returning false ("Returns false if a
++        // partial sequence cannot be removed", llama.h). Found the hard way:
++        // reuse looked like it worked (1320 of 1375 tokens kept) and then
++        // llama_decode failed on the very next chunk.
++        if (n_reuse > 0 && !llama_memory_seq_rm(mem, 0, n_reuse, -1)) {
++            RAC_LOG_INFO("LLM.LlamaCpp",
++                         "Prefix reuse unavailable for this model (partial rewind refused); "
++                         "decoding the full prompt");
++            n_reuse = 0;
++        }
++        if (n_reuse == 0) {
 +            llama_memory_clear(mem, true);
 +        }
 +    }
@@ -99,7 +108,7 @@ index 07124b24b..8b0e81099 100644
          batch.n_tokens = 0;
          int chunk_end = std::min(chunk_start + n_batch, prompt_tokens);
          bool is_last_chunk = (chunk_end == prompt_tokens);
-@@ -1194,6 +1239,11 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+@@ -1194,6 +1248,11 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
          if (llama_decode(context_, batch) != 0) {
              RAC_LOG_ERROR("LLM.LlamaCpp", "llama_decode failed for prompt chunk [%d..%d)",
                            chunk_start, chunk_end);
@@ -111,7 +120,7 @@ index 07124b24b..8b0e81099 100644
              llama_batch_free(batch);
              return false;
          }
-@@ -1268,8 +1318,19 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
+@@ -1268,8 +1327,19 @@ bool LlamaCppTextGeneration::generate_stream(const TextGenerationRequest& reques
      //   3. rac_llm_stream.cpp: proto-byte event emitter
      // Deferred to avoid breaking changes to the stable ABI.
  
@@ -132,7 +141,7 @@ index 07124b24b..8b0e81099 100644
      }
  
      llama_batch_free(batch);
-@@ -1295,6 +1356,7 @@ bool LlamaCppTextGeneration::inject_system_prompt(const std::string& prompt) {
+@@ -1295,6 +1365,7 @@ bool LlamaCppTextGeneration::inject_system_prompt(const std::string& prompt) {
      if (mem) {
          llama_memory_clear(mem, true);
      }
@@ -140,7 +149,7 @@ index 07124b24b..8b0e81099 100644
  
      const auto tokens = common_tokenize(context_, prompt, true, true);
      const int n_tokens = static_cast<int>(tokens.size());
-@@ -1504,6 +1566,7 @@ void LlamaCppTextGeneration::clear_context() {
+@@ -1504,6 +1575,7 @@ void LlamaCppTextGeneration::clear_context() {
          if (mem) {
              llama_memory_clear(mem, true);
          }
@@ -148,7 +157,7 @@ index 07124b24b..8b0e81099 100644
          RAC_LOG_INFO("LLM.LlamaCpp", "clear_context: KV cache cleared");
      }
  }
-@@ -1763,6 +1826,7 @@ bool LlamaCppTextGeneration::remove_lora_adapter(const std::string& adapter_path
+@@ -1763,6 +1835,7 @@ bool LlamaCppTextGeneration::remove_lora_adapter(const std::string& adapter_path
  
      // Clear KV cache after adapter changes
      llama_memory_clear(llama_get_memory(context_), true);
@@ -156,7 +165,7 @@ index 07124b24b..8b0e81099 100644
  
      RAC_LOG_INFO("LLM.LlamaCpp", "LoRA adapter removed: %s (%zu remaining)", adapter_path.c_str(),
                   lora_adapters_.size());
-@@ -1779,6 +1843,7 @@ void LlamaCppTextGeneration::clear_lora_adapters() {
+@@ -1779,6 +1852,7 @@ void LlamaCppTextGeneration::clear_lora_adapters() {
      if (context_) {
          llama_set_adapters_lora(context_, nullptr, 0, nullptr);
          llama_memory_clear(llama_get_memory(context_), true);
