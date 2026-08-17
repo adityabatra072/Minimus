@@ -558,9 +558,11 @@ export default function ChatScreen({
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      // Android needs 'height' here: with undefined the composer sits under the
-      // keyboard whenever windowSoftInputMode is adjustResize.
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      // The activity is adjustResize, so Android already shrinks the window
+      // when the keyboard opens; adding 'height' on top of that double-counts
+      // and pushes the composer off screen (seen on device: keyboard up, no
+      // composer). iOS does need explicit padding.
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <Header
         onOpenModels={onOpenModels}
