@@ -59,9 +59,23 @@ The `ios-build` workflow produces an unsigned IPA on every push. Sign and instal
 
 The built-in catalog targets phones with around 6GB of RAM: LiquidAI LFM2.5-2.6B (default agent model), Qwen3.5-4B (deeper reasoning), and LFM2-1.2B-Tool (fast tier), plus larger options for bigger devices. Voice and vision models (Whisper Tiny, Piper, SmolVLM-500M) download on first use. Any GGUF from Hugging Face can be added from the model manager.
 
+## The engine patch
+
+The published engine drops the context window the app asks for, so every model loads at 2048 tokens regardless (`docs/SDK-FINDINGS.md`). `patches/engine/llamacpp-honour-context-length.patch` fixes it, but the RN packages ship prebuilt native binaries, so it only takes effect once the engine is rebuilt:
+
+```sh
+powershell -File scripts/engine/build-android-engine.ps1   # Android, from Windows, no Mac and no WSL
+```
+
+Run it from PowerShell rather than Git Bash, which rewrites the CMake path arguments. iOS is built by the `ios-patched-engine` workflow, since Apple's toolchain only exists on macOS. Without the rebuild the app still works, at half the context.
+
 ## Design notes
 
-The harness assumes small models fail in specific ways and engineers around them: tools the model chronically misroutes are hidden when intent detection says they cannot be right; usage hints render inline under each tool; oversized tool outputs are truncated before they starve the context; a turn that produces nothing gets one explicit nudge to continue; a tool call cut off by the generation window is retried with a fresh one. The eval suite mirrors the app's exact prompt composition, because an eval that tests a nicer prompt than the one that ships measures nothing.
+The harness assumes small models fail in specific ways and engineers around them: a tool the model chronically misgrabs is hidden when the request makes it impossible (while the user is teaching a phrase, neither replaying nor remembering can be right); usage hints render inline under each tool; oversized tool outputs are truncated before they starve the context; a turn that produces nothing gets one explicit nudge to continue; a tool call cut off by the generation window is retried, and one that arrives missing its closing bracket is salvaged rather than thrown away.
+
+What it deliberately does NOT do is guess which tools a request needs from its wording. That was necessary at 2048 tokens and it failed on ordinary sentences: "How much space have I got left on this phone?" routed to the messaging tools, because "phone" looks like a phone call, so the storage tool was never on the table. Measured across `packages/eval/suites/general.yaml`, 7 of 16 everyday requests never saw the tool they needed. Every group is now exposed and the model chooses.
+
+The eval suite runs the app's own prompt composition (`composeRun`) rather than a copy of it, because a rig that restates the routing in YAML measures the agent you remember writing.
 
 ## License
 
