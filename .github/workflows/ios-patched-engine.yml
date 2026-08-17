@@ -124,7 +124,12 @@ jobs:
             for dest in app/node_modules/@runanywhere/*/ios/Binaries/"$name"; do
               [ -d "$dest" ] || continue
               rm -rf "$dest"
-              cp -R "$built" "$dest"
+              # -L dereferences: the built xcframework holds each archive as a
+              # SYMLINK into the staging tree, and copying the link produced a
+              # framework whose slices carried only Headers. CocoaPods then
+              # rsynced 20MB of headers, logged success, and the app died at Ld
+              # with "Build input file cannot be found: librac_commons.a".
+              cp -RL "$built" "$dest"
               echo "installed $name -> $dest"
               swapped=$((swapped + 1))
             done
@@ -135,8 +140,23 @@ jobs:
           # be found: XCFrameworkIntermediates/RunAnywhereCore/librac_commons.a"
           # even though CocoaPods logged copying the ios-arm64 slice, so the
           # slice layout is what to look at.
-          echo "=== built RACommons layout ==="
-          find sdk/sdk/runanywhere-swift/Binaries/RACommons.xcframework -maxdepth 2 | head -20
+          # Every installed slice must carry a REAL archive, not a link and not
+          # just headers. This is the check that would have caught the symlink
+          # copy immediately instead of at the link step an hour later.
+          echo "=== installed archives ==="
+          missing=0
+          for lib in app/node_modules/@runanywhere/*/ios/Binaries/*.xcframework/*/*.a; do
+            [ -e "$lib" ] || continue
+            if [ -L "$lib" ]; then
+              echo "SYMLINK (will not survive): $lib"
+              missing=$((missing + 1))
+              continue
+            fi
+            size=$(stat -f%z "$lib")
+            echo "$((size / 1024 / 1024))MB  $lib"
+            [ "$size" -gt 1048576 ] || { echo "  ^ suspiciously small"; missing=$((missing + 1)); }
+          done
+          test "$missing" -eq 0 || { echo "$missing archive(s) missing or unusable"; exit 1; }
 
       - name: Upload the built frameworks
         if: inputs.frameworks_run_id == ''
