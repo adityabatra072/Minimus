@@ -71,7 +71,8 @@ function notify(title: string, body: string): void {
 
 /**
  * Parse the model's `when`: "+30" / "30" / "30 minutes" (relative minutes),
- * "HH:MM" (next occurrence today or tomorrow), or an ISO datetime.
+ * "HH:MM" (next occurrence today or tomorrow), "tomorrow 12:15" / "+1d 12:15"
+ * (a day offset with an optional clock time), or an ISO datetime.
  */
 export function parseWhen(when: string, now = new Date()): number {
   const raw = String(when).trim();
@@ -95,10 +96,34 @@ export function parseWhen(when: string, now = new Date()): number {
     if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
     return target.getTime();
   }
+  // "tomorrow 12:15", "+1d 12:15", "+2d" — a day offset with an optional
+  // clock time. Device evidence: asked to put something on tomorrow's
+  // calendar, the model sent when="+1d 12:15" twice in a row and the tool
+  // rejected it both times. Every accepted format could express minutes from
+  // now or a time TODAY, and none could say "tomorrow at 12:15" except a full
+  // ISO datetime, which the model never reached for. That was a gap in what
+  // the tool accepts, not only a mistake by the model.
+  const dayOffset = /^(?:\+(\d+)\s*d|tomorrow|today)\s*(?:at\s*)?(?:(\d{1,2}):(\d{2}))?$/i.exec(raw);
+  if (dayOffset) {
+    const days = dayOffset[1] !== undefined
+      ? parseInt(dayOffset[1], 10)
+      : /^tomorrow/i.test(raw)
+        ? 1
+        : 0;
+    const target = new Date(now);
+    target.setDate(target.getDate() + days);
+    if (dayOffset[2] !== undefined && dayOffset[3] !== undefined) {
+      target.setHours(parseInt(dayOffset[2], 10), parseInt(dayOffset[3], 10), 0, 0);
+    }
+    if (target.getTime() > now.getTime()) return target.getTime();
+  }
   const parsed = new Date(raw);
   if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
 
-  throw new Error('when must be "+N" minutes, "HH:MM", or an ISO datetime');
+  throw new Error(
+    'when must be "+N" (minutes from now), "HH:MM", "tomorrow HH:MM", or an ISO datetime. ' +
+      'To put an event on the calendar, use calendar_create instead.',
+  );
 }
 
 export const scheduler = {

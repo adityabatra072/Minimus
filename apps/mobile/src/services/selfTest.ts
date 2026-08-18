@@ -162,7 +162,24 @@ function checkScheduleParsing(): string {
   if (Math.round((plus - now.getTime()) / 60000) !== 3) throw new Error('"+3" is not 3 minutes out');
   const at = parseWhen('18:30', now);
   if (new Date(at).getHours() !== 18) throw new Error('"18:30" did not parse to 18:xx');
-  return '"+N" and "HH:MM" forms';
+  // Device evidence: asked to schedule something for the next day, the model
+  // sent when="+1d 12:15" twice and the tool rejected it both times. No
+  // accepted format could say "tomorrow at 12:15" short of a full ISO
+  // datetime, which it never reached for.
+  for (const form of ['+1d 12:15', 'tomorrow 12:15']) {
+    const t = new Date(parseWhen(form, now));
+    if (t.getDate() !== 17 || t.getHours() !== 12 || t.getMinutes() !== 15) {
+      throw new Error(`"${form}" parsed to ${t.toISOString()}, expected the 17th at 12:15`);
+    }
+  }
+  let rejected = false;
+  try {
+    parseWhen('sometime next week', now);
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error('garbage "when" was accepted');
+  return '"+N", "HH:MM", "tomorrow HH:MM", and garbage rejected';
 }
 
 async function checkNativeTools(): Promise<string> {
