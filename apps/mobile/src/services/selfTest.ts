@@ -98,6 +98,19 @@ function checkRouting(): string {
       }
     }
   }
+  // Calendar placement must not see schedule_task: device evidence
+  // (calendar-judgment, 1458s, failed) is calendar_query, schedule_task,
+  // calendar_query, schedule_task, schedule_task and never calendar_create.
+  {
+    const place = composeRun('find me 90 minutes for the gym tomorrow and put it in.');
+    if (!place.excludeTools.includes('schedule_task')) {
+      throw new Error('calendar placement still exposes schedule_task');
+    }
+    const defer = composeRun('Check my battery, then in 3 minutes check it again and tell me.');
+    if (defer.excludeTools.includes('schedule_task')) {
+      throw new Error('deferred request lost schedule_task, which is the tool it needs');
+    }
+  }
   // Teaching is the inverse case: the sentence is full of imperatives, and
   // with the device tools visible the model DOES them instead of recording
   // them (device evidence: tools=[set_brightness, flashlight,

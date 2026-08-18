@@ -106,6 +106,29 @@ export function deferredToolExclusions(prompt: string): string[] {
   return DEFERRED_RE.test(prompt) ? ['set_timer', 'set_alarm'] : [];
 }
 
+// "put it in", "book me", "add it to my calendar" — placing something ON the
+// calendar, which is calendar_create's job. schedule_task re-runs the AGENT
+// later and cannot put anything in a calendar.
+const CALENDAR_PLACE_RE =
+  /\b(put it in|put .{0,20}\bon (my )?calendar|add .{0,20}\bto (my )?calendar|book (me )?(a |an )?|block (out )?|schedule (a |an )?(meeting|event|session|slot|gym))\b/i;
+
+/**
+ * Device evidence (calendar-judgment, 1458s, failed): asked to find a gym slot
+ * tomorrow and "put it in", the model called
+ * calendar_query, schedule_task, calendar_query, schedule_task, schedule_task
+ * — never calendar_create. The tool description says "Putting an event or time
+ * block ON THE CALENDAR is calendar_create, never schedule_task", but usage
+ * hints are dropped on an overrun retry, so that guidance disappears exactly
+ * when the model is flailing.
+ *
+ * When the request is calendar placement and has no deferred-agent half, the
+ * tool that cannot be right is schedule_task.
+ */
+export function calendarToolExclusions(prompt: string): string[] {
+  if (!CALENDAR_PLACE_RE.test(prompt) || DEFERRED_RE.test(prompt)) return [];
+  return ['schedule_task'];
+}
+
 /**
  * The user said a phrase they taught ("Wind down.") — the only right move is
  * run_macro, but with define_macro visible the model sometimes re-defines the
@@ -259,6 +282,7 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
     ...(teachingNow ? { allowExecuteOnly: ['define_macro'] } : {}),
     excludeTools: [
       ...deferredToolExclusions(prompt),
+      ...calendarToolExclusions(prompt),
       ...teachingToolExclusions(prompt),
       ...(macroHit?.exclude ?? []),
       ...(opts.extraExcludeTools ?? []),
