@@ -111,7 +111,17 @@ function checkRouting(): string {
     if (!visible.includes('define_macro')) {
       throw new Error('teaching cannot reach define_macro');
     }
-    for (const forbidden of ['set_brightness', 'flashlight', 'send_notification', 'run_macro']) {
+    // set_brightness and flashlight must STAY visible: they are the vocabulary
+    // the macro steps are written in, and hiding them made the model emit
+    // prose steps that define_macro's schema rejects. What must not be here is
+    // anything a macro step cannot contain, plus run_macro (replaying while
+    // being taught is never right).
+    for (const needed of ['set_brightness', 'flashlight']) {
+      if (!visible.includes(needed)) {
+        throw new Error(`teaching lost ${needed}, the steps have no vocabulary`);
+      }
+    }
+    for (const forbidden of ['run_macro', 'web_search', 'send_email', 'play_music']) {
       if (visible.includes(forbidden)) {
         throw new Error(`teaching still exposes ${forbidden} (visible: ${visible.join(',')})`);
       }

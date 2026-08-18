@@ -227,20 +227,28 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
     );
   }
 
-  // Teaching is the one request where the whole tool set is a liability. The
-  // sentence is full of imperatives ("set the brightness to 20 percent, turn
-  // the flashlight off"), and with every tool visible the model does them:
-  // device evidence, teach-macro under full exposure came back
-  // tools=[set_brightness, flashlight, send_notification] and no macro. The
-  // preamble says "Do NOT perform any of the actions now" and loses to the
-  // tools being right there. So while teaching, expose only the macro group —
-  // combined with the exclusions below that leaves define_macro as the one
-  // thing the model can do, which is exactly the truth of the situation.
+  // Teaching needs a middle setting, and both extremes were measured.
+  //
+  // Everything exposed: the model performs the lesson instead of recording it
+  // — teach-macro came back tools=[set_brightness, flashlight,
+  // send_notification] with no macro. "Do NOT perform any of the actions now"
+  // in the preamble loses to the tools being one call away.
+  //
+  // Only the macro group exposed: the model cannot act, and also cannot name
+  // what it is recording, because the tool names ARE the vocabulary the steps
+  // are written in. It produced steps=['set brightness to 20 percent', 'turn
+  // flashlight off'] as prose, which define_macro's schema rejects
+  // ("/steps/0: must be object").
+  //
+  // core + device + schedule is what a macro's steps can actually contain, and
+  // it is the configuration teach-macro passed under repeatedly before the
+  // exposure change. Web, comms and music can never appear in a macro step,
+  // so they are pure temptation here.
   const teachingNow = isTeaching(prompt);
 
   return {
     toolGroups: teachingNow
-      ? ['core']
+      ? ['core', 'device', 'schedule']
       : [
           ...(opts.narrowExposure ? routeToolGroups(prompt, macroNames) : ALL_TOOL_GROUPS),
           ...(opts.extraToolGroups ?? []),
