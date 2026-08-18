@@ -172,7 +172,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       // toolGroups list, which meant a green rehearsal could not tell you
       // whether the app exposes the right tools — it tested the list, not the
       // router.
-      const { toolGroups, excludeTools, preamble } = composeRun(beat.utterance, {
+      const { toolGroups, excludeTools, allowExecuteOnly, preamble } = composeRun(beat.utterance, {
         macroNames: macros.map((m) => m.name),
       });
 
@@ -191,6 +191,7 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           tools: registry,
           toolGroups,
           excludeTools,
+          ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
           preamble,
           approvals: async () => true,
         });

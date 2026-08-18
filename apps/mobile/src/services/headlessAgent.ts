@@ -23,7 +23,7 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
   const macros = await loadMacros().catch(() => []);
   // Same composition the chat screen uses (agent-core/routing.ts): a
   // scheduled run is the same agent, and it can itself defer again.
-  const { toolGroups, excludeTools, preamble } = composeRun(instruction, {
+  const { toolGroups, excludeTools, allowExecuteOnly, preamble } = composeRun(instruction, {
     macroNames: macros.map((m) => m.name),
     origin: 'scheduled',
     extraToolGroups: userToolGroups(),
@@ -37,6 +37,7 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
     tools: getToolRegistry(),
     toolGroups,
     excludeTools,
+    ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
     preamble,
     approvals: async () => false,
   })) {

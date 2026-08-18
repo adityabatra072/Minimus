@@ -36,6 +36,18 @@ export interface AgentRunConfig {
    * goes to schedule_task) beats prompt persuasion on small models.
    */
   excludeTools?: string[];
+  /**
+   * Tools that may actually RUN this turn. Others stay visible to the model
+   * and are refused at execution with a message saying what to do instead.
+   *
+   * Hiding a tool is the stronger guard and should be preferred — but it
+   * costs the model the tool's NAME, and sometimes the name is the point.
+   * Teaching a phrase is exactly that case: the macro's steps are written in
+   * tool names, so the tools must be visible, yet running them is never right
+   * (device evidence: teach-macro recorded the macro AND performed two of the
+   * actions, dimming the screen and toggling the torch mid-lesson).
+   */
+  allowExecuteOnly?: string[];
   policy?: ModelPolicy;
   /** App-supplied persona/context line(s) for the system prompt. */
   preamble?: string;
@@ -376,6 +388,24 @@ export class AgentLoop {
           }
           messages.push({ role: 'user', content: retryNudge(validation.reason, policy.format) });
           yield { type: 'parse_retry', attempt: parseRetriesThisTurn, reason: validation.reason };
+          continue;
+        }
+
+        // ---- execution allowlist ----
+        if (config.allowExecuteOnly && !config.allowExecuteOnly.includes(call.name)) {
+          const refusal =
+            `${call.name} cannot be run right now. Record it as a step inside ` +
+            `${config.allowExecuteOnly.join(' or ')} instead.`;
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            toolName: call.name,
+            content: JSON.stringify({ error: refusal }),
+            isError: true,
+          });
+          yield { type: 'tool_call_finished', call, result: refusal, isError: true };
+          await checkpoint(turn + 1);
+          yield { type: 'turn_finished', turn };
           continue;
         }
 

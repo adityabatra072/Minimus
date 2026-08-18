@@ -336,3 +336,51 @@ describe('AgentLoop', () => {
     expect(log).toEqual(['flashlight:true']);
   });
 });
+
+describe('execution allowlist', () => {
+  it('refuses a tool that is visible but not runnable, and says what to do instead', async () => {
+    const registry = new ToolRegistry();
+    let brightnessRan = false;
+    registry.register({
+      name: 'set_brightness',
+      group: 'device',
+      description: 'set screen brightness',
+      parameters: { type: 'object', properties: { level: { type: 'number' } }, required: ['level'] },
+      execute: async () => {
+        brightnessRan = true;
+        return { ok: true };
+      },
+    });
+    registry.register({
+      name: 'define_macro',
+      group: 'core',
+      description: 'record a phrase',
+      parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      execute: async () => ({ ok: true }),
+    });
+
+    const adapter = new MockAdapter([
+      '[set_brightness(level=20)]',
+      "[define_macro(name='wind down')]",
+      'Recorded.',
+    ]);
+
+    const events: AgentEvent[] = [];
+    for await (const ev of new AgentLoop().run('New rule: when I say wind down, dim the screen', {
+      adapter,
+      tools: registry,
+      toolGroups: ['core', 'device'],
+      allowExecuteOnly: ['define_macro'],
+      approvals: async () => true,
+    })) {
+      events.push(ev);
+    }
+
+    expect(brightnessRan).toBe(false);
+    const refused = events.find(
+      (e) => e.type === 'tool_call_finished' && e.call.name === 'set_brightness',
+    );
+    expect(refused && 'isError' in refused ? refused.isError : false).toBe(true);
+    expect(events.some((e) => e.type === 'tool_call_finished' && e.call.name === 'define_macro')).toBe(true);
+  });
+});

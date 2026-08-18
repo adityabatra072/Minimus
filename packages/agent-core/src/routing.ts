@@ -179,6 +179,8 @@ export interface ComposeOptions {
 export interface RunComposition {
   toolGroups: string[];
   excludeTools: string[];
+  /** Set while teaching: the tools stay visible, only this one may run. */
+  allowExecuteOnly?: string[];
   preamble: string;
 }
 
@@ -254,6 +256,7 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
           ...(opts.extraToolGroups ?? []),
           ...(opts.hasAttachment ? ['vision'] : []),
         ],
+    ...(teachingNow ? { allowExecuteOnly: ['define_macro'] } : {}),
     excludeTools: [
       ...deferredToolExclusions(prompt),
       ...teachingToolExclusions(prompt),

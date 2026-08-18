@@ -218,7 +218,7 @@ export default function ChatScreen({
       // One composition, shared with the headless runner and the eval rig
       // (agent-core/routing.ts). Inlining it here is what let the rig drift
       // from the app.
-      const { toolGroups, excludeTools, preamble } = composeRun(prompt, {
+      const { toolGroups, excludeTools, allowExecuteOnly, preamble } = composeRun(prompt, {
         macroNames: macros.map((m) => m.name),
         origin: origin === 'scheduled' ? 'scheduled' : 'user',
         hasAttachment: !!attachment,
@@ -278,6 +278,7 @@ export default function ChatScreen({
           tools: registry,
           toolGroups,
           excludeTools,
+          ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
           preamble,
           // Settings can waive approval prompts; denial stays the default
           // for anything that sends on the user's behalf.
