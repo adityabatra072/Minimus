@@ -403,7 +403,7 @@ export class AgentLoop {
             content: JSON.stringify({ error: refusal }),
             isError: true,
           });
-          yield { type: 'tool_call_finished', call, result: refusal, isError: true };
+          yield { type: 'tool_call_refused', call, reason: refusal };
           await checkpoint(turn + 1);
           yield { type: 'turn_finished', turn };
           continue;

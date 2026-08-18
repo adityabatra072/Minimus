@@ -377,10 +377,11 @@ describe('execution allowlist', () => {
     }
 
     expect(brightnessRan).toBe(false);
-    const refused = events.find(
-      (e) => e.type === 'tool_call_finished' && e.call.name === 'set_brightness',
-    );
-    expect(refused && 'isError' in refused ? refused.isError : false).toBe(true);
+    // A refusal is NOT a tool failure: the rehearsal counts any tool error as
+    // a failed beat, and a by-design refusal was turning a correct run red.
+    const refused = events.find((e) => e.type === 'tool_call_refused');
+    expect(refused).toBeDefined();
+    expect(events.some((e) => e.type === 'tool_call_finished' && e.isError)).toBe(false);
     expect(events.some((e) => e.type === 'tool_call_finished' && e.call.name === 'define_macro')).toBe(true);
   });
 });

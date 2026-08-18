@@ -337,6 +337,20 @@ export default function ChatScreen({
             ]);
             setWorking(false);
             break;
+          // Declined by design (e.g. an action tool while the user is
+          // teaching a phrase). The audience should not see a red operation
+          // for something the harness chose not to run — drop the rail entry
+          // and let the model try again.
+          case 'tool_call_refused':
+            diag(`tool ${ev.call.name} refused: ${ev.reason}`);
+            setItems((prev) =>
+              prev.map((it) =>
+                it.kind === 'rail'
+                  ? { ...it, ops: it.ops.filter((o) => o.id !== ev.call.id) }
+                  : it,
+              ),
+            );
+            break;
           case 'tool_call_finished': {
             const summary = resultFor(ev.call, ev.result, ev.isError);
             diag(`tool ${ev.call.name} -> ${ev.isError ? 'ERROR ' : ''}${summary}`);

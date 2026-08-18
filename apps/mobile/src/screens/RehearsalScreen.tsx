@@ -217,6 +217,11 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
               diag(`REHEARSAL   · when=${JSON.stringify(ev.call.arguments['when'])}`);
             }
           }
+          // Refused by design (allowExecuteOnly) — worth seeing in the log,
+          // never a failed beat: the harness declined, nothing went wrong.
+          if (ev.type === 'tool_call_refused') {
+            diag(`REHEARSAL   · refused ${ev.call.name}`);
+          }
           if (ev.type === 'tool_call_finished' && ev.isError) {
             failure = `${ev.call.name}: ${ev.result.slice(0, 120)}`;
           }

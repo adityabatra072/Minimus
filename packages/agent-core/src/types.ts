@@ -77,6 +77,13 @@ export type AgentEvent =
   | { type: 'tool_call_finished'; call: ToolCall; result: string; isError: boolean }
   /** A repeat of an already-executed call was served from cache — nothing ran. UIs should not render it. */
   | { type: 'duplicate_call_suppressed'; call: ToolCall }
+  /**
+   * The model called a tool that is visible but not runnable this turn
+   * (AgentRunConfig.allowExecuteOnly). Distinct from tool_call_finished
+   * with isError, because nothing went wrong: the harness declined by
+   * design, and a caller counting failures must not count this one.
+   */
+  | { type: 'tool_call_refused'; call: ToolCall; reason: string }
   | { type: 'parse_retry'; attempt: number; reason: string }
   | { type: 'compaction'; droppedMessages: number }
   | { type: 'turn_finished'; turn: number }
