@@ -227,12 +227,25 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
     );
   }
 
+  // Teaching is the one request where the whole tool set is a liability. The
+  // sentence is full of imperatives ("set the brightness to 20 percent, turn
+  // the flashlight off"), and with every tool visible the model does them:
+  // device evidence, teach-macro under full exposure came back
+  // tools=[set_brightness, flashlight, send_notification] and no macro. The
+  // preamble says "Do NOT perform any of the actions now" and loses to the
+  // tools being right there. So while teaching, expose only the macro group —
+  // combined with the exclusions below that leaves define_macro as the one
+  // thing the model can do, which is exactly the truth of the situation.
+  const teachingNow = isTeaching(prompt);
+
   return {
-    toolGroups: [
-      ...(opts.narrowExposure ? routeToolGroups(prompt, macroNames) : ALL_TOOL_GROUPS),
-      ...(opts.extraToolGroups ?? []),
-      ...(opts.hasAttachment ? ['vision'] : []),
-    ],
+    toolGroups: teachingNow
+      ? ['core']
+      : [
+          ...(opts.narrowExposure ? routeToolGroups(prompt, macroNames) : ALL_TOOL_GROUPS),
+          ...(opts.extraToolGroups ?? []),
+          ...(opts.hasAttachment ? ['vision'] : []),
+        ],
     excludeTools: [
       ...deferredToolExclusions(prompt),
       ...teachingToolExclusions(prompt),

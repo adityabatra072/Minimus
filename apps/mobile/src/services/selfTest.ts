@@ -98,6 +98,25 @@ function checkRouting(): string {
       }
     }
   }
+  // Teaching is the inverse case: the sentence is full of imperatives, and
+  // with the device tools visible the model DOES them instead of recording
+  // them (device evidence: tools=[set_brightness, flashlight,
+  // send_notification] and no macro). Only define_macro can be right here.
+  {
+    const teach = composeRun('New rule: when I say wind down, set the brightness to 20 percent.');
+    const visible = getToolRegistry()
+      .list(teach.toolGroups)
+      .map((t) => t.name)
+      .filter((n) => !teach.excludeTools.includes(n));
+    if (!visible.includes('define_macro')) {
+      throw new Error('teaching cannot reach define_macro');
+    }
+    for (const forbidden of ['set_brightness', 'flashlight', 'send_notification', 'run_macro']) {
+      if (visible.includes(forbidden)) {
+        throw new Error(`teaching still exposes ${forbidden} (visible: ${visible.join(',')})`);
+      }
+    }
+  }
   if (!teachingPreamble('New rule: when I say wind down, dim the screen')) {
     throw new Error('teaching intent not detected');
   }
