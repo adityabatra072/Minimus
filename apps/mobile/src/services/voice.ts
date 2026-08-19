@@ -11,11 +11,20 @@ import { diag } from './diag';
  * TTS) instead of `voice.createSession` — the composed session cannot call
  * tools, and tools are the whole point of this app.
  *
- * Endpointing is energy-based in JS (RMS gate + trailing silence). It is
- * deliberately simple: utterances here are commands a metre from the phone,
- * not far-field dictation. The "E.V" wake phrase is matched on the
- * TRANSCRIPT (tap-to-talk stays wake-free): Whisper hears "E.V" as ev/evie/
- * e v — the regex covers the family.
+ * Two capture modes, because they fail differently:
+ *
+ * PUSH TO TALK (tapping the mic) records until you tap again and transcribes
+ * whatever it got. No thresholds, nothing to tune, and no way to end up
+ * listening forever. Tapping stop used to call stop(), which threw the audio
+ * away without transcribing — so a mic that never crossed the RMS gate left
+ * you stuck on "listening" with no transcript, which is exactly what it did
+ * on device.
+ *
+ * HANDS FREE (wake phrase) still needs endpointing, since nobody is there to
+ * tap: energy-based RMS gate plus trailing silence. Utterances here are
+ * commands a metre from the phone, not far-field dictation. The "E.V" phrase
+ * is matched on the TRANSCRIPT: Whisper hears it as ev/evie/e v — the regex
+ * covers the family.
  */
 
 export type VoiceState = 'idle' | 'preparing' | 'listening' | 'transcribing' | 'speaking';
@@ -27,8 +36,10 @@ const SPEECH_RMS = 900;
 const MIN_SPEECH_MS = 350;
 /** Utterance closes after this much trailing quiet. */
 const TRAIL_SILENCE_MS = 900;
-/** Hard cap so a noisy room cannot record forever. */
+/** Hard cap so a noisy room cannot record forever (hands-free endpointing). */
 const MAX_UTTERANCE_MS = 15_000;
+/** Push-to-talk cap: you are holding the conversation, so it is generous. */
+const MAX_PUSH_TO_TALK_MS = 120_000;
 
 const WAKE_RE = /^\s*(hey |ok |okay )?(e\.?\s?v\.?|evie|ee\s?vee)[,.!?\s]+/i;
 
@@ -75,6 +86,8 @@ export class VoicePipeline {
   private heardSpeech = false;
   private active = false;
   private requireWake = false;
+  /** True while recording a tap-to-talk utterance (no auto-endpointing). */
+  private pushToTalk = false;
 
   constructor(private callbacks: VoiceCallbacks) {}
 
@@ -86,14 +99,34 @@ export class VoicePipeline {
     return this.active;
   }
 
-  async start(): Promise<void> {
+  async start(options: { pushToTalk?: boolean } = {}): Promise<void> {
     if (this.active) return;
     const granted = await this.capture.requestPermission();
     if (!granted) throw new Error('Microphone permission denied — enable it in Settings.');
     this.reset();
+    this.pushToTalk = options.pushToTalk ?? false;
     this.active = true;
     this.callbacks.onState('listening');
     await this.capture.startRecording((chunk) => this.onChunk(chunk));
+  }
+
+  /**
+   * End a push-to-talk recording and transcribe everything captured.
+   * Returns '' when there was nothing usable. Unlike stop(), this never
+   * discards audio — the tap that ends the recording is the whole point.
+   */
+  async stopAndTranscribe(): Promise<string> {
+    if (!this.active) return '';
+    this.active = false;
+    this.capture.stopRecording();
+    if (this.totalMs < 250 || this.frames.length === 0) {
+      this.callbacks.onState('idle', 'too short');
+      return '';
+    }
+    this.callbacks.onState('transcribing');
+    const text = await this.transcribeBuffered();
+    this.callbacks.onState('idle');
+    return text;
   }
 
   stop(): void {
@@ -128,9 +161,18 @@ export class VoicePipeline {
     } else if (this.heardSpeech) {
       this.silenceMs += ms;
     }
-    // Only buffer once speech started (plus keep a short lead-in). Copy —
+    // Push-to-talk keeps every frame: the user decides where the utterance
+    // ends, so there is no reason to gamble on an energy gate. Hands-free
+    // buffers once speech starts (plus a short lead-in). Copy either way —
     // the native side may reuse the underlying buffer between callbacks.
-    if (this.heardSpeech || this.frames.length < 8) this.frames.push(samples.slice());
+    if (this.pushToTalk || this.heardSpeech || this.frames.length < 8) {
+      this.frames.push(samples.slice());
+    }
+
+    if (this.pushToTalk) {
+      if (this.totalMs >= MAX_PUSH_TO_TALK_MS) void this.closeUtterance();
+      return;
+    }
 
     const shouldClose =
       (this.heardSpeech && this.speechMs >= MIN_SPEECH_MS && this.silenceMs >= TRAIL_SILENCE_MS) ||
@@ -149,6 +191,20 @@ export class VoicePipeline {
     }
 
     this.callbacks.onState('transcribing');
+    const text = await this.transcribeBuffered();
+    if (text === '') {
+      this.callbacks.onState('idle');
+      return;
+    }
+    this.callbacks.onUtterance(text);
+  }
+
+  /**
+   * Transcribe whatever is buffered and return it, applying the wake-phrase
+   * gate when one is required. Returns '' for silence, a failed transcription,
+   * or a missing wake phrase — the caller decides what that means.
+   */
+  private async transcribeBuffered(): Promise<string> {
     const total = this.frames.reduce((n, f) => n + f.length, 0);
     const pcm = new Int16Array(total);
     let offset = 0;
@@ -157,6 +213,7 @@ export class VoicePipeline {
       offset += f.length;
     }
     this.frames = [];
+    diag(`voice transcribing ${Math.round(this.totalMs)}ms (${total} samples)`);
 
     try {
       const result = await RunAnywhere.stt.transcribe(
@@ -167,18 +224,15 @@ export class VoicePipeline {
       if (this.requireWake) {
         if (!WAKE_RE.test(text)) {
           this.callbacks.onState('idle', 'no wake phrase');
-          return;
+          return '';
         }
         text = text.replace(WAKE_RE, '').trim();
       }
-      if (text === '') {
-        this.callbacks.onState('idle');
-        return;
-      }
-      this.callbacks.onUtterance(text);
+      return text;
     } catch (err) {
       diag(`voice stt error: ${err instanceof Error ? err.message : String(err)}`);
       this.callbacks.onState('idle', 'transcription failed');
+      return '';
     }
   }
 

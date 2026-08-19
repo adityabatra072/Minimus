@@ -475,17 +475,24 @@ export default function ChatScreen({
       await pipeline.stopSpeaking();
       return;
     }
-    if (voiceState === 'listening' || voiceState === 'transcribing') {
-      pipeline.stop();
+    // Tap to stop = transcribe. This used to call stop(), which threw the
+    // recording away, so unless the energy gate happened to close the
+    // utterance for you the app just sat on "listening" and nothing was ever
+    // written down.
+    if (voiceState === 'listening') {
+      const heard = await pipeline.stopAndTranscribe();
+      if (heard) setInput((prev) => (prev.trim() ? `${prev.trim()} ${heard}` : heard));
       return;
     }
+    if (voiceState === 'transcribing') return;
     try {
       setVoiceState('preparing');
       await ensureVoiceReady((label) => setVoiceDetail(label));
       // A deliberate tap IS the wake signal — the phrase gate only guards
-      // hands-free re-arming.
+      // hands-free re-arming. The transcript lands in the composer so it can
+      // be read and edited before sending, rather than firing a run blind.
       pipeline.setRequireWake(false);
-      await pipeline.start();
+      await pipeline.start({ pushToTalk: true });
     } catch (err) {
       setVoiceState('idle');
       const message = err instanceof Error ? err.message : String(err);
