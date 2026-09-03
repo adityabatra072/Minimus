@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 /**
- * E.V design tokens — "anodize + LED".
+ * Minimus design tokens — "anodize + LED".
  * The palette is the phone itself: anodized blue-black surfaces, one warm
  * LED-amber accent for actions the agent takes on hardware, and a cool signal
  * cyan reserved EXCLUSIVELY for live/running states. If it's not running,

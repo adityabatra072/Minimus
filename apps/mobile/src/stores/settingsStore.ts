@@ -19,7 +19,7 @@ interface SettingsState {
   remote: RemoteEndpoint;
   /** Approval prompts for side-effecting tools (email/SMS/call). */
   requireApprovals: boolean;
-  /** Hands-free voice: re-arm the mic after each turn, gated by "E.V". */
+  /** Hands-free voice: re-arm the mic after each turn, gated by "Minimus". */
   voiceHandsFree: boolean;
   hydrate: () => Promise<void>;
   setRemote: (patch: Partial<RemoteEndpoint>) => void;

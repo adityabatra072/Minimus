@@ -15,7 +15,7 @@ import { color, font, radius, space } from '../theme';
 import { LiveDot } from '../components/LiveDot';
 
 /**
- * Demo rehearsal — runs the storyboard from docs/DEMOS.md against the REAL
+ * Rehearsal — runs the scenario suite against the REAL
  * agent and the REAL tools on this phone, and reports pass/fail per beat.
  *
  * It exists because a demo you haven't run end-to-end on the actual device an

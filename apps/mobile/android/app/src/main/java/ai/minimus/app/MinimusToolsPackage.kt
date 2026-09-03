@@ -1,4 +1,4 @@
-package com.mobile
+package ai.minimus.app
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

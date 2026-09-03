@@ -1,4 +1,4 @@
-# The demo-day scenarios from docs/DEMOS.md, verbatim.
+# The end-to-end scenarios the app is rehearsed against.
 # These are the utterances that will be said in front of an audience, so this
 # suite is the gate: if a beat isn't green here, it does not go in the show.
 # Run: npm run eval -- --suite demos --model lfm2.5-2.6b --repeats 3

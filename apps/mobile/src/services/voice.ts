@@ -22,9 +22,11 @@ import { diag } from './diag';
  *
  * HANDS FREE (wake phrase) still needs endpointing, since nobody is there to
  * tap: energy-based RMS gate plus trailing silence. Utterances here are
- * commands a metre from the phone, not far-field dictation. The "E.V" phrase
- * is matched on the TRANSCRIPT: Whisper hears it as ev/evie/e v — the regex
- * covers the family.
+ * commands a metre from the phone, not far-field dictation. The "Minimus"
+ * wake phrase is matched on the TRANSCRIPT, and Whisper mishears it in a
+ * predictable family (minimus/minimis/minimous/mini mus/minimum) — the regex
+ * covers those rather than demanding a perfect transcription of a word most
+ * STT models have never seen.
  */
 
 export type VoiceState = 'idle' | 'preparing' | 'listening' | 'transcribing' | 'speaking';
@@ -41,7 +43,7 @@ const MAX_UTTERANCE_MS = 15_000;
 /** Push-to-talk cap: you are holding the conversation, so it is generous. */
 const MAX_PUSH_TO_TALK_MS = 120_000;
 
-const WAKE_RE = /^\s*(hey |ok |okay )?(e\.?\s?v\.?|evie|ee\s?vee)[,.!?\s]+/i;
+const WAKE_RE = /^\s*(hey |ok |okay )?(mini\s?mus|minimus|minimis|minimous|minimum)[,.!?\s]+/i;
 
 let voiceReady = false;
 

@@ -1,7 +1,7 @@
 {
   "name": "@minimus/eval",
   "version": "0.1.0",
-  "description": "YAML scenario eval harness for the minimus agent-core against local (rcli/llama-server) or remote OpenAI-compatible model backends.",
+  "description": "YAML scenario eval harness for the Minimus agent-core against local (rcli/llama-server) or remote OpenAI-compatible model backends.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

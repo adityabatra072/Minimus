@@ -38,7 +38,7 @@ import { LiveDot } from '../components/LiveDot';
 import { color, font, radius, space } from '../theme';
 
 /**
- * E.V conversation surface. The stream of raw model tokens NEVER renders —
+ * Minimus conversation surface. The stream of raw model tokens NEVER renders —
  * the UI shows: quiet user pills, the action rail (live operations), a
  * "working" shimmer while the model runs, and the parsed answer typeset
  * plainly once each turn resolves. Tool syntax is invisible by construction.
@@ -141,7 +141,6 @@ export default function ChatScreen({
   const [voiceDetail, setVoiceDetail] = useState('');
   const [attachment, setAttachment] = useState<{ path: string; name: string } | null>(null);
   const voiceRef = useRef<VoicePipeline | null>(null);
-  const speakAnswerRef = useRef(false);
 
   const scrollDown = () =>
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -438,7 +437,7 @@ export default function ChatScreen({
 
   // Voice: mic tap → listen → transcribe → same run() as typed input →
   // speak the answer. Hands-free mode (Settings) re-arms the mic after each
-  // turn and requires the "E.V" wake phrase so table noise can't trigger it.
+  // turn and requires the "Minimus" wake phrase so table noise can't trigger it.
   const runRef = useRef(run);
   runRef.current = run;
   const handsFree = useSettingsStore((s) => s.voiceHandsFree);
@@ -481,7 +480,13 @@ export default function ChatScreen({
     // written down.
     if (voiceState === 'listening') {
       const heard = await pipeline.stopAndTranscribe();
-      if (heard) setInput((prev) => (prev.trim() ? `${prev.trim()} ${heard}` : heard));
+      if (!heard) return;
+      // Speaking IS the send. Making the user tap the arrow afterwards turns a
+      // hands-busy interaction back into a hands-on one; the transcript still
+      // renders as the user turn, so a mishearing is visible in the thread.
+      const finalText = await runRef.current(heard, 'user');
+      // Asked by voice, answered by voice.
+      if (finalText) await pipeline.speak(finalText);
       return;
     }
     if (voiceState === 'transcribing') return;

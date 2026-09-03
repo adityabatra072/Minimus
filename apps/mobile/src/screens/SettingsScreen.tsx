@@ -113,7 +113,7 @@ export default function SettingsScreen({
           <View style={styles.rowMain}>
             <Text style={styles.rowTitle}>Hands-free mode</Text>
             <Text style={styles.rowHint}>
-              After each answer the mic re-arms and listens for “E.V …” — say the wake phrase, then
+              After each answer the mic re-arms and listens for “Minimus …” — say the wake phrase, then
               your request. Off = tap the mic each time.
             </Text>
           </View>

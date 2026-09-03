@@ -4,7 +4,7 @@ import { color, font, space } from '../theme';
 import { LiveDot, StateDot } from './LiveDot';
 
 /**
- * The action rail — E.V's signature element. Every tool run is an operation
+ * The action rail — Minimus's signature element. Every tool run is an operation
  * row on a thin vertical rail: instrument evidence of the agent actually
  * doing things, phrased for humans. Raw tool syntax never appears here.
  */

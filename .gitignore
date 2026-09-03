@@ -25,6 +25,7 @@ packages/eval/results/
 
 # build/session logs
 logs/
+*.log
 hs_err_pid*.log
 replay_pid*.log
 
@@ -33,3 +34,7 @@ dist-ios/
 sideloadlydaemon.log
 hs_err_*.log
 dist-release/
+
+# marketing/content drafts — kept locally, not part of this technical repo
+docs/CONTENT_PACK.md
+docs/DEMOS.md
