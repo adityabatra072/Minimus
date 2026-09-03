@@ -175,7 +175,7 @@ jobs:
         with:
           name: runanywhere-patched-xcframeworks
           path: sdk/sdk/runanywhere-swift/Binaries/
-          retention-days: 7
+          retention-days: 90
           if-no-files-found: error
 
       - name: Pod install
