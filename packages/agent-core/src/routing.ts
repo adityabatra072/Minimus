@@ -273,7 +273,13 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
 
   return {
     toolGroups: teachingNow
-      ? ['core', 'device', 'schedule']
+      ? // A macro step can name any tool the user has actually connected, so
+        // their own groups (MCP servers, custom HTTP tools) belong here too —
+        // without them the model cannot write an MCP step into a taught
+        // phrase, because it never sees the tool's name. This is the same
+        // exposure a normal turn gets, so it adds no budget risk that the
+        // rest of the app does not already carry.
+        ['core', 'device', 'schedule', ...(opts.extraToolGroups ?? [])]
       : [
           ...(opts.narrowExposure ? routeToolGroups(prompt, macroNames) : ALL_TOOL_GROUPS),
           ...(opts.extraToolGroups ?? []),

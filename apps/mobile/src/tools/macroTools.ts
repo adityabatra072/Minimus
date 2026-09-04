@@ -139,6 +139,19 @@ export function macroTools(): ToolDefinition[] {
             performed.push({ tool: step.tool, ok: false, detail: 'tool not available' });
             continue;
           }
+          // Replay executes tools directly, which means it does not pass the
+          // approval card the agent loop puts in front of anything that sends
+          // on the user's behalf. A taught phrase must not become the way
+          // around that gate: "when I say goodnight, text my wife" would fire
+          // silently. Refuse the step and say so.
+          if (registry.requiresApproval({ id: 'macro', name: step.tool, arguments: step.arguments })) {
+            performed.push({
+              tool: step.tool,
+              ok: false,
+              detail: 'needs your confirmation, so it cannot run inside a taught phrase',
+            });
+            continue;
+          }
           try {
             await tool.execute(step.arguments, ctx);
             performed.push({ tool: step.tool, ok: true });
