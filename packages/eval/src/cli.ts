@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OpenAIAdapter, policyFor } from '@minimus/agent-core';
+import { LlamaServerAdapter, OpenAIAdapter, policyFor, type ModelAdapter } from '@minimus/agent-core';
 import { parseSuite } from './scenario.js';
 import { formatReport, runSuite } from './runner.js';
 
@@ -24,6 +24,11 @@ interface Args {
   json?: string;
   verbose: boolean;
   only?: string;
+  /** Send the phone's raw ChatML prompt to llama-server /completion instead of chat/completions. */
+  raw: boolean;
+  toolFormat?: 'compact' | 'lfm-json';
+  router: boolean;
+  thinking?: 'always' | 'adaptive' | 'adaptive-fast';
 }
 
 function parseArgs(argv: string[]): Args {
@@ -33,6 +38,8 @@ function parseArgs(argv: string[]): Args {
     model: 'lfm2.5-2.6b',
     repeats: 1,
     verbose: false,
+    raw: false,
+    router: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -45,6 +52,10 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--json') args.json = next();
     else if (a === '--only') args.only = next();
     else if (a === '--verbose' || a === '-v') args.verbose = true;
+    else if (a === '--raw') args.raw = true;
+    else if (a === '--router') args.router = true;
+    else if (a === '--thinking') args.thinking = next() as 'always' | 'adaptive' | 'adaptive-fast';
+    else if (a === '--tool-format') args.toolFormat = next() as 'compact' | 'lfm-json';
     else if (a === '--help' || a === '-h') {
       console.log(
         'usage: eval --suite <name> --endpoint <url> --model <policy-id> [--server-model <name>] [--repeats N] [--only id,id] [--json out.json] [-v]',
@@ -69,17 +80,19 @@ async function main() {
     }
   }
 
-  const adapter = new OpenAIAdapter(
-    {
-      baseUrl: args.endpoint,
-      model: args.serverModel ?? args.model,
-      // llama-server: suppress thinking for tool turns when the template supports it.
-      extraBody: { chat_template_kwargs: { enable_thinking: false } },
-    },
-    args.model,
-  );
+  const adapter: ModelAdapter = args.raw
+    ? new LlamaServerAdapter({ baseUrl: args.endpoint.replace(/\/v1\/?$/, ''), modelId: args.model })
+    : new OpenAIAdapter(
+        {
+          baseUrl: args.endpoint,
+          model: args.serverModel ?? args.model,
+          // llama-server: suppress thinking for tool turns when the template supports it.
+          extraBody: { chat_template_kwargs: { enable_thinking: false } },
+        },
+        args.model,
+      );
 
-  const policy = policyFor(args.model);
+  const policy = { ...policyFor(args.model), ...(args.toolFormat ? { toolFormat: args.toolFormat } : {}), ...(args.thinking ? { thinkingStrategy: args.thinking } : {}) };
   console.log(
     `suite=${args.suite} scenarios=${suite.scenarios.length} model=${args.model} ` +
       `format=${policy.format} endpoint=${args.endpoint} repeats=${args.repeats}`,
@@ -87,6 +100,7 @@ async function main() {
 
   const report = await runSuite(suite, adapter, {
     repeats: args.repeats,
+    router: args.router,
     policy,
     onProgress: (id, attempt) => process.stdout.write(`  running ${id} (attempt ${attempt})...\n`),
   });

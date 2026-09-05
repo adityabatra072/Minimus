@@ -1,116 +1,89 @@
 # QA plan
 
-Three layers, because they fail differently:
+Four layers, because they fail differently.
 
-1. **System checks** (Rehearsal screen, "system checks" button). Deterministic,
-   under a second, no model involved: tool schemas, prompt budget, intent
-   routing, tool-call parsing, schedule parsing, native bridge, storage,
-   stores, live calendar access. Run these first — a red check means the
-   plumbing is broken and every agent beat after it is noise.
-2. **Deep checks** (Rehearsal screen, "deep"). Every feature the demo beats do
-   not touch, run against the real subsystem: a TTS-to-STT voice round trip
-   (no microphone needed), MCP server connections, custom HTTP tools, the
-   vision model, notifications and timers, a calendar write read back, web
-   search, and storage round trips for memories, macros, scheduled tasks,
-   sessions and settings — each cleaning up after itself. A check whose
-   prerequisite is missing reports "skipped", never a quiet pass. Minutes on
-   first run if it has to download the voice pack.
-3. **Agent beats** (Rehearsal screen, "Run all beats"). Real model, real tools,
-   on the real device. Slow (20 to 90 seconds each on an iPhone 15, several
-   minutes each on an older Android) and the only way to catch model-behavior
-   regressions.
+1. **Unit tests, on a laptop** (`npm test`): the parser, the loop's retry and
+   refusal paths, reflexes, the router's parsing and safety nets, routing
+   composition, schedule parsing.
+2. **The rig, on a laptop** (`npm run eval`): the shipping composition against
+   the real model via `llama-server`, with `--raw` so the prompt is the byte-
+   identical one the phone sends and `--router` so the router pass runs first.
+   `suites/general.yaml` holds paraphrases, ordinary requests, conversation
+   that must call no tool, and conversation after a phrase was taught (the
+   case that once ran the phrase). Score before changing anything; score after.
+3. **Checks and deep checks, on the phone** (Diagnostics screen, or
+   `node scripts/qa/qa.mjs checks` / `deep`): deterministic plumbing checks in
+   under a second, then every subsystem exercised for real: voice round trip,
+   MCP, custom tools, vision, notifications, calendar write-and-read-back,
+   web search, storage round trips.
+4. **Real use, on the phone** (`scripts/qa/seq.sh "…" "…"`): sentences a
+   person would type, through the exact chat path, with what appeared in the
+   thread and every diagnostic line reported back to the laptop.
 
-All three are covered by the shareable report ("share report" next to the
-tally).
+## Driving an iPhone from a Mac
 
-## The fourth layer: does it work for anyone but us
-
-Beats are the demo script. Passing them says nothing about the sentence a real
-person types, and it is easy to tune a harness until it fits its own tests. Two
-things guard against that, both on a laptop, no device required:
+There is no adb on iOS, so the app carries a QA bridge
+(`apps/mobile/src/services/qaBridge.ts`). It polls a tiny HTTP server on the
+laptop for commands and posts results back; a Debug build finds the server
+next to Metro, a Release build needs `scripts/ios/device.sh qa-host x
+<mac-ip>:8787` once. It is off unless one of those is present.
 
 ```sh
-npx tsx packages/eval/src/routingCheck.ts general   # every needed tool exposed?
-npm run eval -- --suite general --endpoint <url> --model lfm2.5-2.6b
+node scripts/qa/qa.mjs serve                 # once
+node scripts/qa/qa.mjs ping                  # handlers the app registered
+scripts/qa/seq.sh "hello" "what did I ask you to do when I say wind down?"
+node scripts/qa/qa.mjs screenshot shot.jpg
+node scripts/qa/qa.mjs state                 # engine, thermal, memory, settings
+node scripts/qa/qa.mjs bench                 # prefill / decode tokens per second
+node scripts/qa/qa.mjs logs | tail -60       # the [minimus] diagnostic ring
+node scripts/qa/qa.mjs navigate brain        # brain|tools|memory|settings|history|diagnostics|chat
+node scripts/qa/qa.mjs run approve '{"ok":true}'   # answer a pending approval card
 ```
 
-`suites/general.yaml` is deliberately not the demo: paraphrases of each beat in
-words the beat never used ("If I ever ask for focus mode…" for the teach beat),
-plus ordinary requests no beat covers, plus two that must call NO tool. Every
-scenario sets `route: true`, so it runs the shipping composition
-(`composeRun`), not a hand-written tool list — a rig that restates the routing
-in YAML is measuring the agent you remember writing.
+Building and installing: `scripts/ios/device.sh all Debug` (two xcodebuild
+passes on a clean derived-data directory; see the script for why).
 
-`routingCheck` answers the cheaper half without a model: was the tool the task
-needs even exposed? A model cannot call a tool it was never given, and that
-failure looks exactly like a model failure in the logs. It found 7 of 16
-ordinary requests were unwinnable before the exposure change.
+## What a real-use pass looks like
 
-## Before a run
+Run in this order; each line says what proves it worked.
 
-- Model downloaded and loaded (open the app once and let it settle)
-- Calendar permission granted, with a few events on tomorrow
-- Notification permission granted
-- Phone unplugged is fine; plugged in is fine too
-- For the Spotify beat: Spotify installed and logged in, network on
-
-## Beat coverage
-
-| Beat | Proves |
+| Say | Proves |
 |---|---|
-| private-remember | memory write, on-device storage |
-| watchdog-arm | deferred agency: schedules a future agent run |
-| teach-macro | records a new phrase without performing its actions |
-| run-macro | replays a taught phrase deterministically |
-| calendar-judgment | reads the calendar, satisfies fuzzy constraints, writes back |
-| private-recall | recall after the app was killed |
-| flashlight | native device control |
-| spotify (opt-in) | track resolution and playback, leaves the app |
+| hello · how's it going? | router says none, no tools, about a second |
+| turn on the flashlight · torch off | reflex, 0.2 s, torch actually toggles |
+| how much battery do I have? | reflex reads the device |
+| remember that my locker code is 4471 · what's my locker code? | memory write; the answer comes from injected facts, no tool |
+| New rule: when I say wind down, … · wind down · what did I ask you to do when I say wind down? | teach (only define_macro runs), replay reflex, question describes instead of running |
+| what's on my calendar tomorrow? | calendar read with gaps, receipt summary |
+| find me an hour for the gym tomorrow afternoon and put it in | judgment plus calendar_create; schedule_task refused |
+| in 2 minutes check my battery and tell me if it changed | schedule_task with "+2", notification at due time, the run fires |
+| text Sam that I'm running late | contact resolves, approval card, Messages opens prefilled |
+| who won the last Monaco Grand Prix? | web search with sources |
+| Tap "chat only", ask anything | no tool can run |
+
+Watch the receipt footers: steps, seconds, tokens/s and the route. Watch
+`health:` lines in the log; when thermal reads serious the phone is throttling
+and timings are not representative.
+
+## Reading a failing run
+
+`node scripts/qa/qa.mjs logs` carries, per run: `route [...]` with the raw
+router output, `tool groups`, every `tool … args=` and its result, `refused`
+lines with the reason the model was given, `retry:` reasons, `gen END` with
+prefill and decode numbers and how much of the prompt came from cache, and
+`health:` with thermal state and memory. Two slow runs look identical in the
+UI and are different underneath:
+
+- `cached 1` on every generation: the prompt cache is being wiped, usually
+  because something changed the system prompt between passes.
+- `cached 1400+` but 5 tok/s: the phone is hot. Check `health:`.
 
 ## Manual passes nothing can automate
 
-Only three, and each needs a human because it needs a human's voice, the OS
-picker, or another app's UI:
-
-- **Wake word**: enable hands-free in Settings, say "E.V, what's my battery?"
-  out loud. The transcript-matching logic is covered by the routing checks, but
-  a real spoken trigger is not automatable.
-- **Image picking**: the OS photo picker itself. The VLM path underneath is
-  covered by the deep checks; this confirms the picker returns a usable path.
-- **Spotify playback**: the beat proves the track resolves and the app opens;
-  confirming audio actually plays is a human ear.
-
-Worth eyeballing once per release, though all of it is machine-checked:
-approval cards pausing a run, the on-device/cloud badge flipping when a remote
-endpoint is enabled, and Settings listing every memory, taught phrase and
-scheduled task with a working delete.
-
-## Driving QA from a laptop
-
-Android, without touching the phone:
-
-```sh
-source tools/qa/adb-qa.sh
-qa_launch
-qa_ask "turn on the flashlight"          # types, sends, waits for the run
-qa_log_tail 20                            # what the agent did
-qa_tap_text "More options"; qa_tap_text "Rehearsal"
-```
-
-iOS: sideload the IPA, open the Rehearsal screen, run the checks and beats,
-then "share report" and paste the report. The device console
-(`idevicesyslog | grep minimus`) carries the same lines live.
-
-## Reading a failing beat
-
-The report and the syslog both carry, per failing beat: the tools that were
-called, what the model said, its raw output (thinking stripped), and any
-parse-retry reasons. `gen END` lines give the per-generation shape: end
-reason, event count, thinking characters, answer characters, prompt
-characters. Two failures look identical in the UI and are completely
-different underneath:
-
-- `thought=0ch text=0ch` — the model produced nothing (runtime or prompt
-  problem)
-- `thought=2000ch text=0ch` — the model thought itself out of budget (a
-  deliberation problem; the harness nudges, then forces answer mode)
+- **Wake word**: hands-free on, say "Minimus, what's my battery?" out loud.
+- **Image picking**: the OS photo picker returns a usable path; the vision
+  pass underneath is covered by the deep checks.
+- **Spotify playback**: the beat proves the track resolves and the app
+  opens; audio is a human ear.
+- **Permission prompts**: notifications are asked at app start; calendar,
+  reminders and contacts at first use. Grant them once.

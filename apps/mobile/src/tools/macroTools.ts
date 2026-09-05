@@ -62,7 +62,8 @@ export function macroTools(): ToolDefinition[] {
   return [
     {
       name: 'define_macro',
-      group: 'core',
+      kind: 'action',
+      group: 'macro',
       description:
         'Record a phrase the user is teaching you, together with the actions it should perform later. Recording only — the actions do NOT happen now.',
       usageHint:
@@ -109,7 +110,8 @@ export function macroTools(): ToolDefinition[] {
     },
     {
       name: 'run_macro',
-      group: 'core',
+      kind: 'action',
+      group: 'macro',
       description: 'Run a phrase the user taught earlier (performs all of its actions)',
       usageHint:
         'If the user says a short phrase they previously taught you, call run_macro with that phrase — do not perform the actions individually.',

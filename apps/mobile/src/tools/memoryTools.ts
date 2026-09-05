@@ -24,6 +24,15 @@ export async function listMemories(): Promise<Memory[]> {
   return loadAll();
 }
 
+/** Memory screen: add a fact by hand, same store the agent writes to. */
+export async function addMemory(text: string): Promise<Memory> {
+  const memories = await loadAll();
+  const memory: Memory = { id: `m_${Date.now().toString(36)}`, text: text.trim(), savedAt: new Date().toISOString().slice(0, 10) };
+  memories.push(memory);
+  await saveAll(memories);
+  return memory;
+}
+
 export async function removeMemory(id: string): Promise<void> {
   const memories = (await loadAll()).filter((m) => m.id !== id);
   await saveAll(memories);
@@ -43,11 +52,35 @@ async function saveAll(memories: Memory[]): Promise<void> {
   await AsyncStorage.setItem(KEY, JSON.stringify(memories));
 }
 
+/**
+ * Same fuzzy match the recall tool uses, exposed so a message can be checked
+ * against memory BEFORE the model runs. Matching facts ride into the context
+ * and a memory question is answered without a tool call at all.
+ */
+export async function matchingFacts(query: string, limit = 3): Promise<string[]> {
+  const memories = await loadAll();
+  if (memories.length === 0) return [];
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9']+/)
+    .filter((t) => t.length > 2 && !STOP.has(t));
+  if (terms.length === 0) return [];
+  return memories
+    .map((m) => ({ m, score: terms.filter((t) => m.text.toLowerCase().includes(t)).length }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ m }) => m.text);
+}
+
+const STOP = new Set(['the', 'and', 'what', 'whats', 'that', 'this', 'with', 'for', 'you', 'your', 'did', 'tell', 'about', 'have', 'was', 'were', 'are', 'can', 'please', 'when', 'say', 'ask', 'asked', 'need', 'know', 'remember', 'recall', 'told']);
+
 export function memoryTools(): ToolDefinition[] {
   return [
     {
       name: 'remember',
-      group: 'core',
+      kind: 'action',
+      group: 'memory',
       description: 'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
       usageHint:
         'remember stores INFORMATION to answer questions later. If the user is instead describing a phrase that should PERFORM actions ("when I say X, do Y and Z", "new rule: …"), that is define_macro, not remember.',
@@ -76,7 +109,7 @@ export function memoryTools(): ToolDefinition[] {
     },
     {
       name: 'recall',
-      group: 'core',
+      group: 'memory',
       description: 'Search on-device memory for previously saved facts',
       usageHint:
         'recall is for finding saved information. If the user says a phrase they TAUGHT you, that is run_macro, not recall.',

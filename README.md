@@ -1,82 +1,146 @@
 # Minimus
 
-A complete agentic AI system that runs on a phone. A local LLM (2.6B parameters, GGUF via llama.cpp) drives a real agent loop with tool calling, persistent memory, self-scheduled tasks, voice, and image understanding. Built on the [RunAnywhere SDKs](https://github.com/RunanywhereAI/runanywhere-sdks) for iOS and Android.
-
-Everything except web search, Spotify, and remote integrations works in airplane mode. Conversations, memory, and taught behaviors live on the device. There is no server component.
+A complete agentic AI system that runs on a phone. A 2.6B-parameter model
+(LFM2.5, GGUF) runs on the phone's GPU through llama.cpp and drives a real
+agent loop: tool calling, persistent memory, taught phrases, self-scheduled
+runs, voice and image understanding. Everything except web search, Spotify
+and any remote integrations you add works in airplane mode. There is no
+server component.
 
 ## What it does
 
-- Tool-calling agent loop tuned for small on-device models: intent-based tool routing, one call per turn, parse retries, truncation recovery, approval cards for anything that sends on your behalf
-- Phone control: flashlight, brightness, battery and storage, open apps, timers, alarms, notifications
-- Calendar with judgment: the calendar tool returns events plus precomputed free gaps, so "find me 90 minutes tomorrow that is not before 10am and not right after standup, and put it in" works offline
-- Persistent local memory: "remember that my appointment is Thursday at 4pm" survives force-quitting the app
-- Taught macros: "New rule: when I say wind down, set brightness to 20 percent, turn the flashlight off, and remind me to set my alarm." Saying "wind down" later replays the steps deterministically
-- Deferred agency: "check my battery again in 3 minutes and tell me if it dropped" schedules a fresh agent run that wakes, compares against remembered state, and notifies
-- Web search with tap-able source citations; Spotify track resolution and autoplay
-- MCP client: connect any streamable-HTTP MCP server (Slack, Google Calendar, GitHub, or your own) from the Tools screen. Server tools appear in the agent, each call approval-gated
-- Custom HTTP tools registered from the UI: give the agent any API with a name, description, URL, and parameters
-- Voice: tap-to-talk with on-device Whisper STT and Piper TTS, plus a hands-free mode with a wake phrase
-- Images: attach a photo and the agent inspects it with an on-device VLM (SmolVLM-500M)
-- Model manager: search Hugging Face, download GGUF models, and swap the brain. Optional routing to any OpenAI-compatible endpoint, with an on-device/cloud badge that always tells you which one answered
+- **Acts on the phone**: flashlight, brightness, battery and storage, open apps
+  and links, clipboard, timers, alarms, notifications, Reminders.
+- **Calendar with judgment**: the calendar tool returns events plus
+  precomputed free gaps, so "find me 90 minutes tomorrow that is not before
+  10am and not right after standup, and put it in" works offline.
+- **Remembers**: "remember that my locker code is 4471" survives force-quitting
+  the app; matching facts are handed to the model before it answers.
+- **Learns phrases**: "New rule: when I say wind down, set brightness to 20
+  percent and turn the flashlight off." Saying "wind down" later replays the
+  steps in 0.2 seconds, without the model.
+- **Comes back later**: "in 20 minutes check my battery and tell me if it
+  dropped" schedules a fresh agent run and a notification at the due time.
+- **Messages the right person**: names resolve through Contacts; email, text
+  and call always show an approval card first.
+- **Looks things up** with tappable sources; plays exact Spotify tracks.
+- **Extends**: connect any streamable-HTTP MCP server or register an HTTP API
+  as a tool from the Tools screen; each call is approval-gated.
+- **Talks and sees**: tap-to-talk with on-device Whisper and Piper, a
+  hands-free wake phrase, and photo understanding with SmolVLM.
+- **Shortcuts**: `minimus://ask?q=turn%20on%20the%20flashlight` opens the app
+  and runs the request, so the Action button, Back Tap or any Shortcut can
+  drive it.
 
-## Honest numbers
+## Honest numbers (iPhone 15, LFM2.5-2.6B on Metal)
 
-An agent turn takes roughly 15 to 45 seconds on a phone CPU. Multi-step tasks take minutes. The app narrates what the agent is doing while it runs. Scheduled tasks fire while the app is alive; overdue tasks run on next launch (the OS suspends background apps). A 2.6B model is a doer, not an oracle: it orchestrates tools well and answers trivia badly, and the tool design leans into that.
+| Request | Time |
+|---|---|
+| "hello" | 0.9 s |
+| "how much battery do I have" | 1.8 s |
+| "wind down" (taught phrase) | 0.2 s |
+| "turn on the flashlight" | 0.2 s |
+| teaching a three-step phrase | 16 s |
+| "what's on my calendar tomorrow" | 8 to 20 s |
+
+Prefill runs at about 250 tokens/s and decode at 24 to 27 tokens/s when the
+phone is cool. Sustained GPU load heats an iPhone 15 within a few minutes and
+iOS throttles it to a quarter of that; the app shrinks its thinking budget and
+says so when the OS reports thermal pressure. Scheduled tasks fire while the
+app is alive; a task due while it is closed posts a notification and runs on
+the next launch.
+
+## How it stays fast and out of trouble
+
+`docs/HOW-IT-WORKS.md` walks through one request in plain language. The
+short version:
+
+1. **Reflexes** execute unambiguous commands and taught phrases instantly.
+2. A **grammar-constrained router pass** on the same model decides which
+   abilities the message needs; "none" means conversation with every tool
+   refused. It runs in its own engine lane so its cached prompt survives.
+3. **One constant system prompt per session**, warmed at load. Per-request
+   steering (clock, guards, remembered facts, taught-phrase steps) rides in a
+   separate turn, so the engine serves the ~1500-token tool list from cache
+   and each request pays only for itself.
+4. **Deterministic guards** refuse the tools that cannot be right for a
+   sentence, with a reason the model can act on, instead of hoping the prompt
+   persuades it.
+5. **Adaptive thinking**: LFM2.5 deliberates for decisions, skips it for
+   confirmations and conversation, and is cut off at a budget.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `packages/agent-core` | Pure-TypeScript agent harness: loop, tool registry, model adapters, per-model policies. No React Native imports; runs and tests on any Node. |
-| `packages/eval` | YAML scenario suites and a runner that scores tool-call validity per model against any OpenAI-compatible endpoint. |
-| `apps/mobile` | React Native app: screens, native tool modules (Kotlin/Objective-C), voice and vision services, MCP client. |
-| `docs/` | Demo storyboards and content. |
+| `packages/agent-core` | Pure-TypeScript harness: loop, router, reflexes, tool registry, prompt layout, parsing, per-model policies. Runs and tests on any Node. |
+| `packages/eval` | YAML scenario suites and a runner that sends the phone's exact prompt to `llama-server` and scores tool calls per model. |
+| `apps/mobile` | React Native app: screens, engine (llama.rn), native tools (Objective-C/Kotlin), voice, vision, MCP client, QA bridge. |
+| `scripts/qa` | Drive the app on a real iPhone from a laptop over Wi-Fi. |
+| `scripts/ios` | Build, install and launch on a connected iPhone from the terminal. |
+| `docs/` | How it works, QA plan, SDK findings, release notes. |
 
 ## Getting started
 
-Prerequisites: Node 20+, and for device builds the usual React Native toolchains (Android Studio/SDK for Android; the iOS app is built by the included GitHub Actions workflow on a macOS runner).
+Prerequisites: Node 22+, Xcode 26 with CocoaPods for iOS, Android Studio for
+Android, and `brew install llama.cpp` if you want the laptop eval rig.
 
 ```sh
 npm install
-npm test                                   # agent-core unit tests
-npm run eval -- --suite demos --model lfm2.5-2.6b   # score scenarios against a local model server
+npm test                                        # harness + eval unit tests
+npm run build -w @minimus/agent-core
 ```
 
-The eval rig talks to any OpenAI-compatible endpoint (llama-server, rcli serve, or a cloud key), so the whole agent harness is developed and validated without a device in the loop.
-
-### Android
+### iOS on a connected iPhone
 
 ```sh
-cd apps/mobile
-npm run android
+cd apps/mobile/ios && pod install && cd -
+scripts/ios/device.sh all Debug                 # build, install, launch
 ```
 
-### iOS
+Set `DEVELOPMENT_TEAM` in `apps/mobile/ios/mobile.xcodeproj` to your team.
+The first launch downloads the chosen model (731 MB or 1.6 GB). To skip the
+download, push a GGUF over USB:
 
-The `ios-build` workflow produces an unsigned IPA on every push. Sign and install it with your own Apple ID using any sideloading tool, or open `apps/mobile/ios` in Xcode on a Mac. The first launch downloads the default model (about 1.7GB).
+```sh
+xcrun devicectl device copy to --device <udid> --source models/LFM2.5-2.6B-QAD-Q4_0.gguf \
+  --destination Documents/models/LFM2.5-2.6B-QAD-Q4_0.gguf \
+  --domain-type appDataContainer --domain-identifier ai.minimus.app
+```
+
+### Driving the phone from the laptop
+
+```sh
+node scripts/qa/qa.mjs serve                    # once, on the Mac
+scripts/qa/seq.sh "hello" "turn on the flashlight" "what's on my calendar tomorrow?"
+node scripts/qa/qa.mjs screenshot out.jpg
+node scripts/qa/qa.mjs logs | tail -40
+```
+
+Debug builds find the QA server next to Metro automatically; a release build
+needs `scripts/ios/device.sh qa-host x <mac-ip>:8787` once.
+
+### The eval rig
+
+```sh
+llama-server -m models/LFM2.5-2.6B-QAD-Q4_0.gguf --port 8091 -c 8192 -ngl 99
+npm run eval -- --suite general --endpoint http://127.0.0.1:8091 --model lfm2.5-2.6b --raw --router --repeats 2
+```
+
+`--raw` sends the byte-identical prompt the phone sends; `--router` runs the
+router pass first, as the app does. `suites/general.yaml` is deliberately not
+the demo: paraphrases, ordinary requests, and conversation that must call no
+tool. Current scores for LFM2.5-2.6B: 90 to 94% general, 100% demos.
 
 ## Models
 
-The built-in catalog targets phones with around 6GB of RAM: LiquidAI LFM2.5-2.6B (default agent model), Qwen3.5-4B (deeper reasoning), and LFM2-1.2B-Tool (fast tier), plus larger options for bigger devices. Voice and vision models (Whisper Tiny, Piper, SmolVLM-500M) download on first use. Any GGUF from Hugging Face can be added from the model manager.
-
-## The engine patch
-
-The published engine drops the context window the app asks for, so every model loads at 2048 tokens regardless (`docs/SDK-FINDINGS.md`). `patches/engine/llamacpp-honour-context-length.patch` fixes it, but the RN packages ship prebuilt native binaries, so it only takes effect once the engine is rebuilt:
-
-```sh
-powershell -File scripts/engine/build-android-engine.ps1   # Android, from Windows, no Mac and no WSL
-```
-
-Run it from PowerShell rather than Git Bash, which rewrites the CMake path arguments. iOS is built by the `ios-patched-engine` workflow, since Apple's toolchain only exists on macOS. Without the rebuild the app still works, at half the context.
-
-## Design notes
-
-The harness assumes small models fail in specific ways and engineers around them: a tool the model chronically misgrabs is hidden when the request makes it impossible (while the user is teaching a phrase, neither replaying nor remembering can be right); usage hints render inline under each tool; oversized tool outputs are truncated before they starve the context; a turn that produces nothing gets one explicit nudge to continue; a tool call cut off by the generation window is retried, and one that arrives missing its closing bracket is salvaged rather than thrown away.
-
-What it deliberately does NOT do is guess which tools a request needs from its wording. That was necessary at 2048 tokens and it failed on ordinary sentences: "How much space have I got left on this phone?" routed to the messaging tools, because "phone" looks like a phone call, so the storage tool was never on the table. Measured across `packages/eval/suites/general.yaml`, 7 of 16 everyday requests never saw the tool they needed. Every group is now exposed and the model chooses.
-
-The eval suite runs the app's own prompt composition (`composeRun`) rather than a copy of it, because a rig that restates the routing in YAML measures the agent you remember writing.
+Curated for a 6 GB phone: LFM2.5-2.6B (default; thinks when the ask needs
+judgment), LFM2.5-1.2B-Instruct (fast, weaker at picking tools: 19 to 31% on
+the general suite, offered as an explicit choice), LFM2-1.2B-Tool, Qwen3.5-4B
+for big devices, plus any GGUF from Hugging Face via the Brain screen. Whisper
+Tiny, Piper and SmolVLM-500M download on first use.
 
 ## License
 
-Apache 2.0. See `LICENSE`. The RunAnywhere SDKs this app depends on carry their own license.
+Apache 2.0. See `LICENSE`. The RunAnywhere SDK used for the voice pipeline and
+llama.rn carry their own licenses.

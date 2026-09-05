@@ -2,9 +2,12 @@ import {
   AgentLoop,
   composeRun,
   policyFor,
+  effectiveCategories,
+  routeWithModel,
   type AgentEvent,
   type ModelAdapter,
   type ModelPolicy,
+  type RouterCategory,
 } from '@minimus/agent-core';
 import { buildMockTools, callsSatisfy } from './mockTools.js';
 import type { Scenario, Suite } from './scenario.js';
@@ -16,6 +19,7 @@ export interface ScenarioResult {
   failures: string[];
   turnsUsed: number;
   toolCallsMade: { name: string; arguments: Record<string, unknown> }[];
+  routed?: string[];
   finalText: string;
   events: AgentEvent[];
   durationMs: number;
@@ -38,6 +42,8 @@ export interface RunSuiteOptions {
   onProgress?: (scenarioId: string, attempt: number) => void;
   /** Approval handler defaults to auto-approve (eval measures capability, not UX). */
   autoApprove?: boolean;
+  /** Run the router pass first (as the app does) and expose only its groups. */
+  router?: boolean;
 }
 
 export async function runScenario(
@@ -49,8 +55,12 @@ export async function runScenario(
   const { registry, recorded } = buildMockTools(scenario.tool_results ?? {});
   // `route: true` runs the app's own composition, so a routing change that
   // breaks a real request shows up here instead of in a demo.
+  let categories: RouterCategory[] | undefined;
+  if (scenario.route && options.router) {
+    categories = effectiveCategories((await routeWithModel(adapter, scenario.prompt)).categories, scenario.prompt);
+  }
   const routed = scenario.route
-    ? composeRun(scenario.prompt, { macroNames: scenario.macros ?? [] })
+    ? composeRun(scenario.prompt, { macroNames: scenario.macros ?? [], toolsByGroup: registry.byGroup(), ...(categories ? { categories } : {}) })
     : null;
   const loop = new AgentLoop();
   const events: AgentEvent[] = [];
@@ -69,6 +79,10 @@ export async function runScenario(
           toolGroups: routed.toolGroups,
           excludeTools: routed.excludeTools,
           preamble: routed.preamble,
+          deliberate: routed.deliberate,
+          denyTools: routed.denyTools,
+          ...(routed.allowExecuteOnly ? { allowExecuteOnly: routed.allowExecuteOnly } : {}),
+          ...(routed.allowExecuteReason ? { allowExecuteReason: routed.allowExecuteReason } : {}),
         }
       : {
           ...(scenario.tools ? { toolGroups: scenario.tools } : {}),
@@ -114,6 +128,7 @@ export async function runScenario(
     failures,
     turnsUsed,
     toolCallsMade: recorded,
+    ...(categories ? { routed: categories } : {}),
     finalText,
     events,
     durationMs: Date.now() - started,

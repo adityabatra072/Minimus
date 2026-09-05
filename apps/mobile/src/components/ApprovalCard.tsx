@@ -1,11 +1,12 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { color, font, radius, space } from '../theme';
+import { StyleSheet, Text, View } from 'react-native';
+import { radius, space, usePalette } from '../theme';
+import { Button, Label } from '../ui/primitives';
 
 /**
- * Inline confirmation for side-effecting actions (email, SMS, calls).
- * A card in the conversation, not a system alert — the run visibly pauses
- * and waits, which is the trust story of the demo.
+ * Inline confirmation for side-effecting actions (email, SMS, calls, and any
+ * tool the user added). A card in the conversation, not a system alert — the
+ * run visibly pauses and waits, which is the trust story.
  */
 export function ApprovalCard({
   title,
@@ -16,18 +17,15 @@ export function ApprovalCard({
   detail: string;
   onDecision: (approved: boolean) => void;
 }): React.JSX.Element {
+  const p = usePalette();
   return (
-    <View style={styles.card}>
-      <Text style={styles.eyebrow}>needs your ok</Text>
-      <Text style={styles.title}>{title}</Text>
-      {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+    <View style={[styles.card, { backgroundColor: p.accentSoft, borderColor: p.accent }]}>
+      <Label tone="accent">needs your ok</Label>
+      <Text style={[styles.title, { color: p.ink }]}>{title}</Text>
+      {detail ? <Text style={[styles.detail, { color: p.ink2 }]}>{detail}</Text> : null}
       <View style={styles.row}>
-        <TouchableOpacity style={styles.deny} onPress={() => onDecision(false)}>
-          <Text style={styles.denyText}>Don’t</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.allow} onPress={() => onDecision(true)}>
-          <Text style={styles.allowText}>Do it</Text>
-        </TouchableOpacity>
+        <Button label="Not now" kind="ghost" small onPress={() => onDecision(false)} style={{ flex: 1 }} />
+        <Button label="Do it" kind="primary" small onPress={() => onDecision(true)} style={{ flex: 1 }} />
       </View>
     </View>
   );
@@ -35,39 +33,14 @@ export function ApprovalCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: color.amberDeep,
     padding: space(4),
     marginVertical: space(2),
     gap: space(1.5),
+    alignSelf: 'stretch',
   },
-  eyebrow: {
-    color: color.amber,
-    fontFamily: font.mono,
-    fontSize: 11,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  title: { color: color.text, fontSize: 15, fontWeight: '600' },
-  detail: { color: color.dim, fontSize: 13, lineHeight: 19 },
+  title: { fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
+  detail: { fontSize: 14, lineHeight: 20 },
   row: { flexDirection: 'row', gap: space(2), marginTop: space(2) },
-  deny: {
-    flex: 1,
-    paddingVertical: space(2.5),
-    borderRadius: radius.chip,
-    borderWidth: 1,
-    borderColor: color.line,
-    alignItems: 'center',
-  },
-  denyText: { color: color.dim, fontWeight: '600', fontSize: 14 },
-  allow: {
-    flex: 1,
-    paddingVertical: space(2.5),
-    borderRadius: radius.chip,
-    backgroundColor: color.amber,
-    alignItems: 'center',
-  },
-  allowText: { color: color.bg0, fontWeight: '700', fontSize: 14 },
 });

@@ -1,25 +1,30 @@
 import React, { useMemo, useState } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { getToolRegistry } from '../tools';
 import { useToolStore, type CustomHttpTool, type McpServerConfig } from '../stores/toolStore';
 import { mcpStatus, syncToolPlatform } from '../services/toolPlatform';
-import { color, font, radius, space } from '../theme';
+import { verbFor } from '../services/humanize';
+import { font, radius, space, usePalette } from '../theme';
+import { Button, Chip, Field, Header, Label, Row, Screen, Segmented, Toggle } from '../ui/primitives';
 
 /**
- * The agent's capability surface, user-controlled: every registered tool
- * visible and toggleable, plus user-defined HTTP tools and MCP servers.
- * "Claude Code for phone" means the user decides what the agent can touch.
+ * Tools — the agent's capability surface, user-controlled: every built-in
+ * tool with a switch, plus your own HTTP tools and MCP servers. Anything you
+ * add asks for approval every time it runs.
  */
 
+const GROUP_LABEL: Record<string, string> = {
+  device: 'Phone',
+  schedule: 'Calendar and time',
+  core: 'Memory and phrases',
+  web: 'Web',
+  comms: 'Messages and calls',
+  music: 'Music',
+  vision: 'Photos',
+};
+
 export default function ToolsScreen({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const p = usePalette();
   const disabled = useToolStore((s) => s.disabled);
   const setDisabled = useToolStore((s) => s.setDisabled);
   const custom = useToolStore((s) => s.custom);
@@ -33,190 +38,134 @@ export default function ToolsScreen({ onClose }: { onClose: () => void }): React
   const [, forceRender] = useState(0);
 
   const builtins = useMemo(() => {
-    const byGroup = new Map<string, { name: string; description: string }[]>();
-    for (const t of getToolRegistry().list()) {
+    const byGroup = new Map<string, { name: string; description: string; approval: boolean }[]>();
+    const registry = getToolRegistry();
+    for (const t of registry.list()) {
       if (t.group === 'custom' || t.group === 'mcp') continue;
       const group = t.group ?? 'core';
-      byGroup.set(group, [...(byGroup.get(group) ?? []), { name: t.name, description: t.description }]);
+      byGroup.set(group, [
+        ...(byGroup.get(group) ?? []),
+        { name: t.name, description: t.description, approval: registry.requiresApproval({ id: 'x', name: t.name, arguments: {} }) },
+      ]);
     }
-    return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const order = ['device', 'schedule', 'core', 'web', 'comms', 'music', 'vision'];
+    return [...byGroup.entries()].sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
   }, []);
 
-  const resync = () => {
-    void syncToolPlatform(getToolRegistry()).then(() => forceRender((n) => n + 1));
-  };
+  const resync = () => void syncToolPlatform(getToolRegistry()).then(() => forceRender((n) => n + 1));
+  const enabledCount = builtins.reduce((n, [, ts]) => n + ts.filter((t) => !disabled.includes(t.name)).length, 0);
+  const totalCount = builtins.reduce((n, [, ts]) => n + ts.length, 0);
 
   return (
-    <View style={styles.root}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Tools</Text>
-        <TouchableOpacity onPress={onClose} hitSlop={12}>
-          <Text style={styles.close}>Done</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.blurb}>
-          Everything the agent can do, and the switch for each. Tools you add here need your
-          approval every time they run.
+    <Screen>
+      <Header title="Tools" eyebrow={`${enabledCount} of ${totalCount} built-in on`} onClose={onClose} />
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <Text style={[styles.blurb, { color: p.ink2 }]}>
+          Everything the agent can touch, and the switch for each. Tools you add need your approval every time they run.
         </Text>
 
-        <Text style={styles.sectionLabel}>mcp servers</Text>
-        {mcpServers.length === 0 ? (
-          <Text style={styles.rowHint}>No MCP servers added yet.</Text>
-        ) : null}
-        {mcpServers.map((s) => {
-          const status = mcpStatus.get(s.name);
-          return (
-            <View key={s.name} style={styles.row}>
-              <View style={styles.rowMain}>
-                <Text style={styles.rowTitle}>{s.name}</Text>
-                <Text style={styles.rowHint} numberOfLines={1}>
-                  {s.url}
-                </Text>
-                <Text style={[styles.rowMeta, status?.state === 'error' && styles.err]}>
-                  {status
-                    ? status.state === 'ok'
-                      ? `connected · ${status.tools} tools`
-                      : `error: ${status.detail.slice(0, 80)}`
-                    : 'not connected yet'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                hitSlop={10}
-                onPress={() => removeMcpServer(s.name)}
-                accessibilityRole="button"
-                accessibilityLabel="Delete MCP server"
-              >
-                <Text style={styles.delete}>✕</Text>
-              </TouchableOpacity>
+        {builtins.map(([group, tools]) => (
+          <View key={group} style={styles.group}>
+            <Label style={{ marginLeft: space(1) }}>{GROUP_LABEL[group] ?? group}</Label>
+            <View>
+              {tools.map((t, i) => (
+                <Row
+                  key={t.name}
+                  title={humanName(t.name)}
+                  subtitle={`${t.description}${t.approval ? ' · asks first' : ''}`}
+                  right={<Toggle value={!disabled.includes(t.name)} onChange={(on) => setDisabled(t.name, !on)} />}
+                  first={i === 0}
+                  last={i === tools.length - 1}
+                />
+              ))}
             </View>
-          );
-        })}
-        {showMcpForm ? (
-          <McpForm
-            onAdd={(server) => {
-              addMcpServer(server);
-              setShowMcpForm(false);
-              resync();
-            }}
-            onCancel={() => setShowMcpForm(false)}
-          />
-        ) : (
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.addBtn} onPress={() => setShowMcpForm(true)}>
-              <Text style={styles.addBtnText}>＋ add MCP server</Text>
-            </TouchableOpacity>
-            {mcpServers.length > 0 ? (
-              <TouchableOpacity style={styles.addBtn} onPress={resync}>
-                <Text style={styles.addBtnText}>reconnect</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        )}
-
-        <Text style={styles.sectionLabel}>custom tools</Text>
-        {custom.length === 0 ? <Text style={styles.rowHint}>No custom tools yet.</Text> : null}
-        {custom.map((t) => (
-          <View key={t.name} style={styles.row}>
-            <View style={styles.rowMain}>
-              <Text style={styles.rowTitle}>{t.name}</Text>
-              <Text style={styles.rowHint} numberOfLines={2}>
-                {t.method} {t.url}
-              </Text>
-            </View>
-            <TouchableOpacity
-              hitSlop={10}
-              onPress={() => {
-                removeCustom(t.name);
-                resync();
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Delete custom tool"
-            >
-              <Text style={styles.delete}>✕</Text>
-            </TouchableOpacity>
           </View>
         ))}
-        {showCustomForm ? (
-          <CustomForm
-            onAdd={(tool) => {
-              addCustom(tool);
-              setShowCustomForm(false);
-              resync();
-            }}
-            onCancel={() => setShowCustomForm(false)}
-          />
-        ) : (
-          <TouchableOpacity style={styles.addBtn} onPress={() => setShowCustomForm(true)}>
-            <Text style={styles.addBtnText}>＋ add HTTP tool</Text>
-          </TouchableOpacity>
-        )}
 
-        <Text style={styles.sectionLabel}>built-in</Text>
-        {builtins.map(([group, tools]) => (
-          <View key={group} style={styles.groupBlock}>
-            <Text style={styles.groupLabel}>{group}</Text>
-            {tools.map((t) => (
-              <View key={t.name} style={styles.toolRow}>
-                <View style={styles.rowMain}>
-                  <Text style={styles.toolName}>{t.name}</Text>
-                  <Text style={styles.rowHint} numberOfLines={1}>
-                    {t.description}
+        <View style={styles.group}>
+          <Label style={{ marginLeft: space(1) }}>MCP servers</Label>
+          <Text style={[styles.hint, { color: p.ink3 }]}>Connect any streamable-HTTP MCP server. Its tools appear to the agent, each behind an approval card.</Text>
+          {mcpServers.map((s) => {
+            const status = mcpStatus.get(s.name);
+            return (
+              <View key={s.name} style={[styles.card, { backgroundColor: p.surface, borderColor: p.line }]}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[styles.cardTitle, { color: p.ink }]}>{s.name}</Text>
+                  <Text style={[styles.cardMeta, { color: p.ink3 }]} numberOfLines={1}>
+                    {s.url}
+                  </Text>
+                  <Text style={[styles.cardMeta, { color: status?.state === 'error' ? p.danger : status ? p.ok : p.ink3 }]}>
+                    {status ? (status.state === 'ok' ? `connected · ${status.tools} tools` : `error: ${status.detail.slice(0, 80)}`) : 'not connected yet'}
                   </Text>
                 </View>
-                <Switch
-                  value={!disabled.includes(t.name)}
-                  onValueChange={(on) => setDisabled(t.name, !on)}
-                  trackColor={{ true: color.amberDeep, false: color.bg2 }}
-                  thumbColor={!disabled.includes(t.name) ? color.amber : color.faint}
-                />
+                <Button label="Remove" kind="ghost" small onPress={() => { removeMcpServer(s.name); resync(); }} />
               </View>
-            ))}
-          </View>
-        ))}
+            );
+          })}
+          {showMcpForm ? (
+            <McpForm onAdd={(server) => { addMcpServer(server); setShowMcpForm(false); resync(); }} onCancel={() => setShowMcpForm(false)} />
+          ) : (
+            <View style={styles.actions}>
+              <Chip label="+ Add MCP server" onPress={() => setShowMcpForm(true)} />
+              {mcpServers.length > 0 ? <Chip label="Reconnect" onPress={resync} /> : null}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.group}>
+          <Label style={{ marginLeft: space(1) }}>Your HTTP tools</Label>
+          <Text style={[styles.hint, { color: p.ink3 }]}>Give the agent any API: a name, what it does, a URL and its parameters.</Text>
+          {custom.map((t) => (
+            <View key={t.name} style={[styles.card, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[styles.cardTitle, { color: p.ink }]}>{t.name}</Text>
+                <Text style={[styles.cardMeta, { color: p.ink3 }]} numberOfLines={2}>
+                  {t.method} {t.url}
+                </Text>
+              </View>
+              <Button label="Remove" kind="ghost" small onPress={() => { removeCustom(t.name); resync(); }} />
+            </View>
+          ))}
+          {showCustomForm ? (
+            <CustomForm onAdd={(tool) => { addCustom(tool); setShowCustomForm(false); resync(); }} onCancel={() => setShowCustomForm(false)} />
+          ) : (
+            <View style={styles.actions}>
+              <Chip label="+ Add HTTP tool" onPress={() => setShowCustomForm(true)} />
+            </View>
+          )}
+        </View>
       </ScrollView>
-    </View>
+    </Screen>
   );
 }
 
-function McpForm({
-  onAdd,
-  onCancel,
-}: {
-  onAdd: (s: McpServerConfig) => void;
-  onCancel: () => void;
-}): React.JSX.Element {
+function humanName(tool: string): string {
+  const v = verbFor({ id: 'x', name: tool, arguments: {} });
+  // verbFor phrases an action in progress ("Turning flashlight on"); the
+  // list wants the noun. Fall back to the snake_case name spaced out.
+  return v && !/…/.test(v) && v !== tool.replace(/_/g, ' ') ? v.replace(/^(Turning|Setting|Reading|Opening|Copying|Searching|Checking|Adding|Starting|Scheduling|Posting|Playing|Drafting|Calling|Running|Saving) /, '') : tool.replace(/_/g, ' ');
+}
+
+function McpForm({ onAdd, onCancel }: { onAdd: (s: McpServerConfig) => void; onCancel: () => void }): React.JSX.Element {
+  const p = usePalette();
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [auth, setAuth] = useState('');
   return (
-    <View style={styles.form}>
-      <Input label="Name" value={name} onChange={setName} placeholder="slack" />
-      <Input label="URL" value={url} onChange={setUrl} placeholder="https://mcp.example.com/mcp" />
-      <Input
-        label='Auth (optional): "Bearer KEY" or "header-name: KEY"'
-        value={auth}
-        onChange={setAuth}
-        placeholder="x-api-key: ak_…"
-        secure
-      />
-      <FormButtons
-        canSave={name.trim() !== '' && url.trim().startsWith('http')}
-        onSave={() => onAdd({ name: name.trim(), url: url.trim(), auth: auth.trim() })}
-        onCancel={onCancel}
-      />
+    <View style={[styles.form, { backgroundColor: p.surface, borderColor: p.ink }]}>
+      <Field label="Name" value={name} onChangeText={setName} placeholder="slack" />
+      <Field label="URL" value={url} onChangeText={setUrl} placeholder="https://mcp.example.com/mcp" keyboardType="url" />
+      <Field label='Auth (optional): "Bearer KEY" or "header-name: KEY"' value={auth} onChangeText={setAuth} placeholder="x-api-key: ak_…" secureTextEntry />
+      <View style={styles.formButtons}>
+        <Button label="Cancel" kind="ghost" small onPress={onCancel} />
+        <Button label="Connect" small disabled={!(name.trim() && url.trim().startsWith('http'))} onPress={() => onAdd({ name: name.trim(), url: url.trim(), auth: auth.trim() })} />
+      </View>
     </View>
   );
 }
 
-function CustomForm({
-  onAdd,
-  onCancel,
-}: {
-  onAdd: (t: CustomHttpTool) => void;
-  onCancel: () => void;
-}): React.JSX.Element {
+function CustomForm({ onAdd, onCancel }: { onAdd: (t: CustomHttpTool) => void; onCancel: () => void }): React.JSX.Element {
+  const p = usePalette();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [url, setUrl] = useState('');
@@ -224,203 +173,35 @@ function CustomForm({
   const [headersJson, setHeadersJson] = useState('');
   const [params, setParams] = useState('');
   return (
-    <View style={styles.form}>
-      <Input label="Tool name (snake_case)" value={name} onChange={setName} placeholder="check_weather" />
-      <Input
-        label="Description (the model reads this)"
-        value={description}
-        onChange={setDescription}
-        placeholder="Get the weather for a city"
-      />
-      <Input label="URL" value={url} onChange={setUrl} placeholder="https://api.example.com/weather" />
-      <View style={styles.methodRow}>
-        {(['GET', 'POST'] as const).map((m) => (
-          <TouchableOpacity
-            key={m}
-            style={[styles.methodBtn, method === m && styles.methodBtnOn]}
-            onPress={() => setMethod(m)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={[styles.methodText, method === m && styles.methodTextOn]}>{m}</Text>
-          </TouchableOpacity>
-        ))}
+    <View style={[styles.form, { backgroundColor: p.surface, borderColor: p.ink }]}>
+      <Field label="Tool name (snake_case)" value={name} onChangeText={setName} placeholder="check_weather" />
+      <Field label="Description (the model reads this)" value={description} onChangeText={setDescription} placeholder="Get the weather for a city" autoCapitalize="sentences" />
+      <Field label="URL" value={url} onChangeText={setUrl} placeholder="https://api.example.com/weather" keyboardType="url" />
+      <Segmented options={[{ value: 'GET', label: 'GET' }, { value: 'POST', label: 'POST' }]} value={method} onChange={setMethod} />
+      <Field label='Parameters ("name: description, name: description")' value={params} onChangeText={setParams} placeholder="city: the city to check" />
+      <Field label="Headers JSON (optional)" value={headersJson} onChangeText={setHeadersJson} placeholder='{"x-api-key": "…"}' />
+      <View style={styles.formButtons}>
+        <Button label="Cancel" kind="ghost" small onPress={onCancel} />
+        <Button
+          label="Save"
+          small
+          disabled={!(name.trim() && description.trim() && url.trim().startsWith('http'))}
+          onPress={() => onAdd({ name: name.trim(), description: description.trim(), url: url.trim(), method, headersJson: headersJson.trim(), params: params.trim() })}
+        />
       </View>
-      <Input
-        label='Parameters ("name: description, name: description")'
-        value={params}
-        onChange={setParams}
-        placeholder="city: the city to check"
-      />
-      <Input
-        label="Headers JSON (optional)"
-        value={headersJson}
-        onChange={setHeadersJson}
-        placeholder='{"x-api-key": "…"}'
-      />
-      <FormButtons
-        canSave={name.trim() !== '' && description.trim() !== '' && url.trim().startsWith('http')}
-        onSave={() =>
-          onAdd({
-            name: name.trim(),
-            description: description.trim(),
-            url: url.trim(),
-            method,
-            headersJson: headersJson.trim(),
-            params: params.trim(),
-          })
-        }
-        onCancel={onCancel}
-      />
-    </View>
-  );
-}
-
-function Input({
-  label,
-  value,
-  onChange,
-  placeholder,
-  secure,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  secure?: boolean;
-}): React.JSX.Element {
-  return (
-    <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        style={styles.fieldInput}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={color.faint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        secureTextEntry={secure}
-      />
-    </View>
-  );
-}
-
-function FormButtons({
-  canSave,
-  onSave,
-  onCancel,
-}: {
-  canSave: boolean;
-  onSave: () => void;
-  onCancel: () => void;
-}): React.JSX.Element {
-  return (
-    <View style={styles.formButtons}>
-      <TouchableOpacity style={[styles.saveBtn, !canSave && styles.saveBtnOff]} disabled={!canSave} onPress={onSave}>
-        <Text style={styles.saveText}>Save</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={onCancel} hitSlop={8}>
-        <Text style={styles.cancelText}>Cancel</Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.bg0 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: space(4),
-    paddingVertical: space(3),
-  },
-  title: { color: color.text, fontSize: 20, fontWeight: '800' },
-  close: { color: color.amber, fontSize: 15, fontWeight: '600' },
-  body: { padding: space(4), gap: space(2), paddingBottom: space(10) },
-  blurb: { color: color.dim, fontSize: 13, lineHeight: 19 },
-  sectionLabel: {
-    color: color.faint,
-    fontSize: 11,
-    fontFamily: font.mono,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginTop: space(3),
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: color.line,
-    padding: space(3.5),
-    gap: space(2),
-  },
-  rowMain: { flex: 1, gap: space(0.75) },
-  rowTitle: { color: color.text, fontSize: 14, fontWeight: '600' },
-  rowHint: { color: color.dim, fontSize: 12 },
-  rowMeta: { color: color.faint, fontSize: 11, fontFamily: font.mono },
-  err: { color: color.danger },
-  delete: { color: color.faint, fontSize: 16 },
-  actionsRow: { flexDirection: 'row', gap: space(2) },
-  addBtn: {
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: radius.chip,
-    paddingHorizontal: space(3),
-    paddingVertical: space(2),
-    alignSelf: 'flex-start',
-  },
-  addBtnText: { color: color.cyan, fontSize: 13 },
-  groupBlock: {
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: color.line,
-    padding: space(3),
-    gap: space(2),
-  },
-  groupLabel: { color: color.amber, fontSize: 11, fontFamily: font.mono, letterSpacing: 1 },
-  toolRow: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  toolName: { color: color.text, fontSize: 13, fontFamily: font.mono },
-  form: {
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: color.amberDeep,
-    padding: space(3),
-    gap: space(2),
-  },
-  field: { gap: space(1) },
-  fieldLabel: { color: color.faint, fontSize: 11, fontFamily: font.mono },
-  fieldInput: {
-    color: color.text,
-    fontSize: 14,
-    backgroundColor: color.bg0,
-    borderRadius: radius.chip,
-    paddingHorizontal: space(2.5),
-    paddingVertical: space(2),
-  },
-  methodRow: { flexDirection: 'row', gap: space(2) },
-  methodBtn: {
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: radius.chip,
-    paddingHorizontal: space(3),
-    paddingVertical: space(1.5),
-  },
-  methodBtnOn: { borderColor: color.amber },
-  methodText: { color: color.faint, fontSize: 12, fontFamily: font.mono },
-  methodTextOn: { color: color.amber },
-  formButtons: { flexDirection: 'row', alignItems: 'center', gap: space(4), marginTop: space(1) },
-  saveBtn: {
-    backgroundColor: color.amber,
-    borderRadius: radius.chip,
-    paddingHorizontal: space(4),
-    paddingVertical: space(2),
-  },
-  saveBtnOff: { opacity: 0.4 },
-  saveText: { color: color.bg0, fontWeight: '700', fontSize: 13 },
-  cancelText: { color: color.faint, fontSize: 13 },
+  body: { paddingHorizontal: space(4), paddingBottom: space(12), gap: space(6) },
+  blurb: { fontSize: 14, lineHeight: 20 },
+  group: { gap: space(2) },
+  hint: { fontSize: 12, lineHeight: 17, marginLeft: space(1) },
+  card: { flexDirection: 'row', alignItems: 'center', gap: space(3), borderWidth: 1, borderRadius: radius.lg, padding: space(4) },
+  cardTitle: { fontSize: 15, fontWeight: '600' },
+  cardMeta: { fontSize: 11, fontFamily: font.mono },
+  actions: { flexDirection: 'row', gap: space(2), flexWrap: 'wrap' },
+  form: { borderWidth: 1, borderRadius: radius.lg, padding: space(4), gap: space(3) },
+  formButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: space(2), marginTop: space(1) },
 });

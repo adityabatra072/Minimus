@@ -23,6 +23,20 @@ export function verbFor(call: ToolCall): string {
       return `Opening ${str(a['app'], 'app')}`;
     case 'clipboard_write':
       return 'Copying to clipboard';
+    case 'clipboard_read':
+      return 'Reading clipboard';
+    case 'open_url':
+      return `Opening ${str(a['url'], 'link').replace(/^https?:\/\//, '').slice(0, 40)}`;
+    case 'find_contact':
+      return `Looking up ${str(a['name'], 'contact')}`;
+    case 'describe_image':
+      return 'Looking at the photo';
+    case 'define_macro':
+      return `Learning “${str(a['name'], 'phrase')}”`;
+    case 'run_macro':
+      return `Running “${str(a['name'], 'phrase')}”`;
+    case 'schedule_task':
+      return `Scheduling: ${str(a['instruction'], 'task').slice(0, 60)}`;
     case 'web_search':
       return `Searching “${str(a['query'], '…')}”`;
     case 'fetch_page':
@@ -30,17 +44,15 @@ export function verbFor(call: ToolCall): string {
     case 'calendar_create':
       return `Adding “${str(a['title'], 'event')}” to calendar`;
     case 'calendar_query':
-      return 'Checking calendar';
+      return `Checking calendar for ${str(a['date'], 'today')}`;
     case 'create_reminder':
-      return `Setting reminder “${str(a['title'], '…')}”`;
+      return `Adding reminder “${str(a['title'], '…')}”`;
     case 'set_alarm':
       return `Setting alarm for ${str(a['time'], '…')}`;
     case 'set_timer': {
       const m = Number(a['minutes']);
       return `Starting a ${Number.isFinite(m) ? m : '…'} min timer`;
     }
-    case 'schedule_task':
-      return `Scheduling: ${str(a['instruction'], 'task')}`;
     case 'send_notification':
       return 'Posting notification';
     case 'play_music':
@@ -96,6 +108,11 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
       return 'Page read';
     case 'calendar_create':
       return r['status'] === 'editor_opened_for_confirmation' ? 'Opened in calendar' : 'Event added';
+    case 'calendar_query': {
+      const events = Array.isArray(r['events']) ? r['events'].length : 0;
+      const gaps = Array.isArray(r['free_gaps']) ? r['free_gaps'].length : 0;
+      return `${events} event${events === 1 ? '' : 's'}, ${gaps} free gap${gaps === 1 ? '' : 's'}`;
+    }
     case 'set_alarm':
       return 'Alarm set';
     case 'set_timer':
@@ -106,6 +123,25 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
       return 'Notified';
     case 'clipboard_write':
       return 'Copied';
+    case 'clipboard_read':
+      return r['empty'] ? 'Clipboard is empty' : `Read ${String(r['text'] ?? '').length} characters`;
+    case 'open_url':
+      return 'Opened';
+    case 'find_contact': {
+      const matches = Array.isArray(r['matches']) ? r['matches'].length : 0;
+      return matches > 0 ? `${matches} match${matches === 1 ? '' : 'es'}` : 'No match';
+    }
+    case 'create_reminder':
+      return r['due'] ? `Reminder set for ${String(r['due'])}` : 'Added to Reminders';
+    case 'describe_image':
+      return 'Described';
+    case 'define_macro':
+      return `Learned, ${String(r['step_count'] ?? '?')} steps`;
+    case 'run_macro': {
+      const performed = Array.isArray(r['performed']) ? (r['performed'] as { ok: boolean }[]) : [];
+      const okCount = performed.filter((s) => s.ok).length;
+      return `${okCount}/${performed.length} steps done`;
+    }
     case 'play_music':
       return r['now_playing'] ? `Playing ${str(r['now_playing'])}` : 'Opened in Spotify';
     case 'remember':
@@ -116,7 +152,7 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
     }
     case 'send_email':
     case 'send_sms':
-      return 'Ready to send';
+      return r['to'] ? `Ready to send to ${String(r['to'])}` : 'Ready to send';
     case 'make_call':
       return 'Dialing';
     case 'run_js':

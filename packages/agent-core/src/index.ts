@@ -8,3 +8,7 @@ export * from './adapter.js';
 export * from './loop.js';
 export { OpenAIAdapter, type OpenAIAdapterConfig } from './adapters/openai.js';
 export { MockAdapter, type MockScriptEntry } from './adapters/mock.js';
+export { LlamaServerAdapter, type LlamaServerConfig } from './adapters/llamaServer.js';
+export * from './chatml.js';
+export * from './reflex.js';
+export * from './router.js';

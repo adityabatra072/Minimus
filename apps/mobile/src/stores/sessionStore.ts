@@ -50,6 +50,28 @@ async function saveIndex(sessions: SessionMeta[]) {
   await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(sessions)).catch(() => undefined);
 }
 
+// Appends are read-modify-write on one key. Two appends in the same tick (a
+// receipt and the answer that follows it) both read the old transcript and
+// the second write drops the first — device evidence: reflex receipts missing
+// after a reload. Serialise them.
+let writeChain: Promise<void> = Promise.resolve();
+function appendTranscript(id: string, messages: SessionMessage[]): Promise<void> {
+  writeChain = writeChain.then(async () => {
+    const raw = await AsyncStorage.getItem(transcriptKey(id)).catch(() => null);
+    let transcript: SessionMessage[] = [];
+    if (raw) {
+      try {
+        transcript = JSON.parse(raw) as SessionMessage[];
+      } catch {
+        transcript = [];
+      }
+    }
+    transcript.push(...messages);
+    await AsyncStorage.setItem(transcriptKey(id), JSON.stringify(transcript)).catch(() => undefined);
+  });
+  return writeChain;
+}
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   activeSessionId: newId(),
@@ -114,21 +136,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ sessions: next });
     void saveIndex(next);
     AsyncStorage.setItem(ACTIVE_KEY, activeSessionId).catch(() => undefined);
-    void (async () => {
-      const raw = await AsyncStorage.getItem(transcriptKey(activeSessionId)).catch(() => null);
-      let transcript: SessionMessage[] = [];
-      if (raw) {
-        try {
-          transcript = JSON.parse(raw) as SessionMessage[];
-        } catch {
-          transcript = [];
-        }
-      }
-      transcript.push(...messages);
-      await AsyncStorage.setItem(transcriptKey(activeSessionId), JSON.stringify(transcript)).catch(
-        () => undefined,
-      );
-    })();
+    void appendTranscript(activeSessionId, messages);
   },
 
   loadTranscript: async (id: string) => {

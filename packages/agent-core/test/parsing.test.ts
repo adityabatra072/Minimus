@@ -217,3 +217,13 @@ describe('reasoning extraction', () => {
     expect(text).toBe('Just an answer.');
   });
 });
+
+describe('mixed pythonic/JSON dialect', () => {
+  it('accepts [name{json}] as a call', () => {
+    const out = parseAssistantOutput('[calendar_create{"title": "Wake Up", "start": "2026-09-06T06:30:00"}]', 'pythonic', ['calendar_create']);
+    expect(out.calls).toHaveLength(1);
+    expect(out.calls[0]!.name).toBe('calendar_create');
+    expect(out.calls[0]!.arguments).toEqual({ title: 'Wake Up', start: '2026-09-06T06:30:00' });
+    expect(out.text).toBe('');
+  });
+});

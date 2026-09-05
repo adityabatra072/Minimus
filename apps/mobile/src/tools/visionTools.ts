@@ -1,7 +1,5 @@
-import { RunAnywhere, ImageInputs } from '@runanywhere/core';
 import type { ToolDefinition } from '@minimus/agent-core';
-import { registerVlmModel, VLM_MODEL_ID } from '../services/catalog';
-import { diag } from '../services/diag';
+import { describeImage } from '../services/vision';
 
 /**
  * Image understanding as a TOOL, not a separate mode: the chat attaches an
@@ -14,7 +12,6 @@ import { diag } from '../services/diag';
  */
 
 let attachedImagePath: string | null = null;
-let vlmReady = false;
 
 export function setAttachedImage(path: string | null): void {
   attachedImagePath = path;
@@ -22,22 +19,6 @@ export function setAttachedImage(path: string | null): void {
 
 export function getAttachedImage(): string | null {
   return attachedImagePath;
-}
-
-async function ensureVlmReady(): Promise<void> {
-  if (vlmReady) return;
-  await registerVlmModel();
-  const downloaded = new Set(
-    (await RunAnywhere.models.list({ downloadedOnly: true }).catch(() => [])).map((m) => m.id),
-  );
-  if (!downloaded.has(VLM_MODEL_ID)) {
-    diag('vision: downloading SmolVLM');
-    for await (const ev of RunAnywhere.models.download(VLM_MODEL_ID)) {
-      if (ev.type === 'failed') throw new Error('vision model download failed');
-    }
-  }
-  await RunAnywhere.models.load(VLM_MODEL_ID);
-  vlmReady = true;
 }
 
 export function visionTools(): ToolDefinition[] {
@@ -61,12 +42,11 @@ export function visionTools(): ToolDefinition[] {
         if (!attachedImagePath) {
           return { error: 'No image is attached right now.' };
         }
-        await ensureVlmReady();
-        const result = await RunAnywhere.vlm.generate(
-          ImageInputs.file(attachedImagePath),
+        const description = await describeImage(
+          attachedImagePath,
           String(args['question'] ?? 'Describe this image in detail.'),
         );
-        return { description: result.text.slice(0, 1500) };
+        return { description: description.slice(0, 1500) };
       },
     },
   ];

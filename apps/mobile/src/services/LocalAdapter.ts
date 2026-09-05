@@ -1,177 +1,136 @@
-import { RunAnywhere } from '@runanywhere/core';
-import { diag } from './diag';
 import type {
   AdapterEvent,
   ChatMessage,
   GenerateOptions,
   ModelAdapter,
 } from '@minimus/agent-core';
+import { policyFor, renderChatMl } from '@minimus/agent-core';
+import { engine } from './engine';
+import { diag } from './diag';
+import { deviceHealth } from './health';
 
 /**
- * ModelAdapter over the on-device RunAnywhere SDK.
+ * ModelAdapter over the on-device engine (services/engine.ts, llama.rn).
  *
- * The adapter formats the FULL ChatML transcript itself and sends it as a
- * string prompt. The llama.cpp backend passes pre-templated prompts through
- * VERBATIM when they contain `<|im_start|>` (build_prompt, llamacpp_backend
- * .cpp) — which sidesteps a real on-device failure: LFM2.5's jinja template
- * is unknown to llama_chat_apply_template (result=-1), and the "role:
- * content" fallback makes the model emit EOS after ~9 tokens. Both LFM2/2.5
- * and Qwen are ChatML-native, so one formatter serves every catalog model.
+ * The adapter renders the FULL ChatML transcript itself and hands it to the
+ * engine verbatim. LFM2.5's own jinja template forces `<think>` open on every
+ * assistant turn and mis-renders multi-turn tool history, and Qwen is
+ * ChatML-native, so one formatter serves every catalog model and the harness
+ * stays in charge of what the model sees.
  *
  * Tool calling stays HARNESS-side (agent-core parses the raw text), identical
- * to the Windows eval rig.
+ * to the laptop eval rig.
  */
 
 const IM_START = '<|im_start|>';
 const IM_END = '<|im_end|>';
 
-/** Render one argument value the way LFM2.5's own template does. */
-function lfmArgValue(value: unknown): string {
-  if (typeof value === 'string') {
-    return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')}'`;
-  }
-  if (value !== null && typeof value === 'object') return JSON.stringify(value);
-  return String(value);
-}
-
-function toChatMl(messages: ChatMessage[], lfm: boolean): string {
-  let out = '';
-  const turn = (role: string, content: string) => {
-    out += `${IM_START}${role}\n${content}${IM_END}\n`;
-  };
-  for (const m of messages) {
-    switch (m.role) {
-      case 'system':
-        turn('system', m.content);
-        break;
-      case 'user':
-        turn('user', m.content);
-        break;
-      case 'assistant': {
-        let content = m.content;
-        for (const call of m.toolCalls ?? []) {
-          if (lfm) {
-            // LFM2.5's template renders history calls in its own pythonic
-            // wrapper — Hermes-style JSON here is off-distribution.
-            const args = Object.entries(call.arguments)
-              .map(([k, v]) => `${k}=${lfmArgValue(v)}`)
-              .join(', ');
-            content += `<|tool_call_start|>[${call.name}(${args})]<|tool_call_end|>`;
-          } else {
-            content +=
-              (content ? '\n' : '') +
-              `<tool_call>${JSON.stringify({ name: call.name, arguments: call.arguments })}</tool_call>`;
-          }
-        }
-        turn('assistant', content);
-        break;
-      }
-      case 'tool':
-        if (lfm) {
-          // The LFM template renders any role verbatim: tool results are a
-          // plain `tool` turn, not a user-wrapped envelope.
-          turn('tool', m.content);
-        } else {
-          turn('user', `<tool_response name="${m.toolName}">\n${m.content}\n</tool_response>`);
-        }
-        break;
-    }
-  }
-  // THE line that ended a week of silent-turn hunts: LFM2.5's generation
-  // prompt is `<|im_start|>assistant\n<think>` — thinking FORCED OPEN by the
-  // template. Without the prefill the model is off-distribution and often
-  // emits EOS instead of deliberating; the rig never saw it because
-  // llama-server applies the real template.
-  //
-  // Prefilling a CLOSED thought to suppress deliberation was tried and
-  // removed: on device it produced dead generations (events=4, 22 characters,
-  // no answer) and cost two beats that had been passing. Thinking is not
-  // steerable from the prompt here; the harness frees context budget instead.
-  out += lfm ? `${IM_START}assistant\n<think>` : `${IM_START}assistant\n`;
-  return out;
-}
-
 export class LocalAdapter implements ModelAdapter {
-  constructor(readonly modelId: string) {}
+  constructor(
+    readonly modelId: string,
+    /** 'router' runs on the engine's dedicated classification lane. */
+    private readonly lane: 'main' | 'router' = 'main',
+  ) {}
 
-  async *generate(
-    messages: ChatMessage[],
-    options: GenerateOptions,
-  ): AsyncIterable<AdapterEvent> {
+  async *generate(messages: ChatMessage[], options: GenerateOptions): AsyncIterable<AdapterEvent> {
     const lfm = this.modelId.toLowerCase().includes('lfm');
-    const prompt = toChatMl(messages, lfm);
-    console.log(`[minimus] generate start model=${this.modelId} promptChars=${prompt.length}`);
-    const stream = RunAnywhere.llm.generateStream(prompt, {
-      model: this.modelId,
-      temperature: options.temperature,
-      topP: options.topP,
-      maxOutputTokens: options.maxOutputTokens,
-      // THE week-long "silent turn" bug: with reasoning unset the runtime
-      // STRIPS thought spans from the stream — a turn the model spent
-      // thinking surfaced as zero events and read as instant-EOS
-      // (gen END: events=2 thought=0 text=0 on a 69s generation). The
-      // harness owns think-tag parsing, so ask for thoughts verbatim.
-      reasoning: { mode: 'on', includeInOutput: true },
-      // Stop on the next turn header: with a verbatim prompt the model owns
-      // turn boundaries, and some models keep writing the next turn.
-      stopSequences: [IM_END, IM_START, ...(options.stopSequences ?? [])],
-    });
-
-    // The prompt pre-opened <think> for LFM — surface the opening tag to the
-    // harness so extractReasoning sees a complete block when the model closes
-    // it with its own </think>.
-    if (lfm) yield { type: 'delta', text: '<think>' };
-    let inThinking = false;
-    // Stream forensics: rig A/B proved the silent turns are runtime-specific,
-    // not prompt-text — so the stream itself must testify. Counts by kind +
-    // how it ended, one syslog line per generation.
-    let thoughtChars = 0;
-    let textChars = 0;
-    let endReason = 'iterator-exhausted';
-    let eventCount = 0;
-    for await (const event of stream) {
-      eventCount += 1;
-      if (eventCount === 1 || eventCount % 100 === 0) {
-        console.log(`[minimus] stream event #${eventCount}: ${event.type}`);
-      }
-      if (options.signal?.aborted) {
-        // Exiting the for-await closes the SDK's pushStream, which cancels
-        // the native generation.
-        break;
-      }
-      switch (event.type) {
-        case 'token': {
-          if (event.kind === 'thought') {
-            thoughtChars += event.text.length;
-            const prefix = inThinking ? '' : '<think>';
-            inThinking = true;
-            yield { type: 'delta', text: prefix + event.text };
-          } else {
-            textChars += event.text.length;
-            const prefix = inThinking ? '</think>' : '';
-            inThinking = false;
-            yield { type: 'delta', text: prefix + event.text };
-          }
-          break;
-        }
-        case 'failed':
-          endReason = 'failed';
-          diag(
-            `gen END ${endReason}: events=${eventCount} thought=${thoughtChars}ch text=${textChars}ch`,
-          );
-          throw event.error;
-        case 'completed':
-          endReason = 'completed';
-          break;
-        default:
-          break;
-      }
+    const policy = policyFor(this.modelId);
+    const mode = options.thinkingMode ?? (policy.thinking ? 'open' : 'none');
+    const thinking = mode === 'open';
+    const prompt = renderChatMl(messages, { lfm, thinking: mode });
+    // A hot phone throttles the GPU to a quarter of its speed (24 → 6 tok/s
+    // measured). Long deliberation is what generates the heat, so when the
+    // OS reports thermal pressure the thinking budget shrinks: shorter turns,
+    // less heat, and the answer still arrives.
+    let budget = options.thinkingBudgetTokens;
+    if (this.lane === 'main' && thinking && budget !== undefined) {
+      const health = await deviceHealth();
+      if (health.thermal === 'critical') budget = Math.min(budget, 96);
+      else if (health.thermal === 'serious') budget = Math.min(budget, 192);
+      if (budget !== options.thinkingBudgetTokens) diag(`thermal ${health.thermal}: thinking budget ${options.thinkingBudgetTokens} → ${budget}`);
     }
-    if (options.signal?.aborted) endReason = 'aborted';
-    diag(
-      `gen END ${endReason}: events=${eventCount} thought=${thoughtChars}ch text=${textChars}ch promptChars=${prompt.length}`,
-    );
-    if (inThinking) yield { type: 'delta', text: '</think>' };
-    yield { type: 'done' };
+    if (this.lane === 'router') {
+      const r = await engine.classify(prompt, options.grammar ?? '', options.maxOutputTokens, options.signal);
+      yield { type: 'delta', text: r.text };
+      yield { type: 'done', usage: r.usage };
+      return;
+    }
+    diag(`generate start model=${this.modelId} promptChars=${prompt.length} think=${mode}`);
+
+    // The engine calls back per token; the harness wants an async iterable.
+    // Bridge with a queue so tokens flow while the completion is in flight.
+    const queue: string[] = [];
+    let wake: (() => void) | null = null;
+    let finished = false;
+    let failure: unknown = null;
+    let result: Awaited<ReturnType<typeof engine.complete>> | null = null;
+    const push = (text: string) => {
+      queue.push(text);
+      wake?.();
+    };
+    const run = engine
+      .complete(
+        prompt,
+        {
+          maxTokens: options.maxOutputTokens,
+          temperature: options.temperature,
+          topP: options.topP,
+          ...(options.topK !== undefined ? { topK: options.topK } : {}),
+          ...(options.repeatPenalty !== undefined ? { repeatPenalty: options.repeatPenalty } : {}),
+          stop: [IM_END, IM_START, ...(options.stopSequences ?? [])],
+          ...(thinking && budget !== undefined ? { thinkingBudgetTokens: budget, thinkingForcedOpen: true } : {}),
+          ...(options.grammar ? { grammar: options.grammar } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+        push,
+      )
+      .then((r) => {
+        result = r;
+      })
+      .catch((err: unknown) => {
+        failure = err;
+      })
+      .finally(() => {
+        finished = true;
+        wake?.();
+      });
+
+    // The prompt pre-opened <think>; surface the opening tag so the harness
+    // sees a complete block when the model closes it.
+    if (thinking) yield { type: 'delta', text: '<think>' };
+    let emitted = 0;
+    while (true) {
+      while (queue.length > 0) {
+        const text = queue.shift()!;
+        emitted += text.length;
+        yield { type: 'delta', text };
+      }
+      if (finished) break;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      wake = null;
+    }
+    await run;
+    if (failure) {
+      if (options.signal?.aborted) {
+        yield { type: 'done' };
+        return;
+      }
+      throw failure instanceof Error ? failure : new Error(String(failure));
+    }
+    if (result) {
+      const r = result as Awaited<ReturnType<typeof engine.complete>>;
+      // A generation the sampler cut at the output cap while still inside
+      // <think> has no closing tag; the harness treats an unclosed block as
+      // reasoning-only, which is the correct reading.
+      if (r.stoppedBy === 'context_full') {
+        diag('gen hit the context window — the harness will compact');
+      }
+      yield { type: 'done', usage: r.usage };
+    } else {
+      yield { type: 'done' };
+    }
+    void emitted;
   }
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
@@ -6,50 +6,70 @@ import {
   Linking,
   Modal,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import { AgentLoop, type AgentEvent, type ToolCall } from '@minimus/agent-core';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  AgentLoop,
+  extractReasoning,
+  matchReflex,
+  policyFor,
+  effectiveCategories,
+  routeWithModel,
+  type AgentEvent,
+  type RouterCategory,
+  type ToolCall,
+} from '@minimus/agent-core';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { LocalAdapter } from '../services/LocalAdapter';
 import { RemoteAdapter } from '../services/RemoteAdapter';
+import { engine } from '../services/engine';
 import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSessionStore, type SessionMessage } from '../stores/sessionStore';
 import { verbFor, resultFor } from '../services/humanize';
-import { overlay } from '../services/overlay';
 import { scheduler } from '../services/scheduler';
 import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
+import { matchingFacts } from '../tools/memoryTools';
 import { composeRun } from '../services/intent';
 import { acquireRun, isRunBusy, releaseRun } from '../services/runLock';
 import { userExcludedTools, userToolGroups } from '../services/toolPlatform';
 import { ensureVoiceReady, VoicePipeline, type VoiceState } from '../services/voice';
-import { launchImageLibrary } from 'react-native-image-picker';
 import { setAttachedImage } from '../tools/visionTools';
-import { ActionRail, type Operation } from '../components/ActionRail';
-import { AgentText } from '../components/AgentText';
+import { registerQaHandler } from '../services/qaBridge';
+import { allModels, type ModelSpec } from '../services/models';
+import { deviceHealth } from '../services/health';
+import { Receipt, type Operation, type ReceiptFooter } from '../components/Receipt';
+import { AgentText, Sources, ThinkingLine, type Source } from '../components/AgentText';
 import { ApprovalCard } from '../components/ApprovalCard';
 import { Composer } from '../components/Composer';
-import { LiveDot } from '../components/LiveDot';
-import { color, font, radius, space } from '../theme';
+import { Core, type CoreState } from '../ui/Core';
+import { Label } from '../ui/primitives';
+import { GlyphClock, GlyphMenu, GlyphPlus } from '../ui/glyphs';
+import { elevation, font, radius, space, usePalette } from '../theme';
 
 /**
- * Minimus conversation surface. The stream of raw model tokens NEVER renders —
- * the UI shows: quiet user pills, the action rail (live operations), a
- * "working" shimmer while the model runs, and the parsed answer typeset
- * plainly once each turn resolves. Tool syntax is invisible by construction.
+ * Home: the conversation. What the model streams is shown live — a faded
+ * glimpse of its thinking, then the answer as it types — and every tool it
+ * runs is a line on a receipt. Raw tool syntax never renders.
  */
+
+export type Destination = 'history' | 'brain' | 'tools' | 'memory' | 'settings' | 'diagnostics';
 
 type Item =
   | { kind: 'user'; id: string; text: string }
   | { kind: 'scheduled'; id: string; text: string }
   | { kind: 'agent'; id: string; text: string }
+  | { kind: 'live'; id: string; text: string; reasoning: string; startedAt: number; thinkingDone?: boolean }
   | { kind: 'sources'; id: string; sources: Source[] }
-  | { kind: 'rail'; id: string; ops: Operation[] }
+  | { kind: 'receipt'; id: string; ops: Operation[]; footer?: ReceiptFooter }
+  | { kind: 'notice'; id: string; text: string; tone: 'muted' | 'danger' }
   | {
       kind: 'approval';
       id: string;
@@ -59,12 +79,6 @@ type Item =
       resolved?: 'yes' | 'no';
     };
 
-interface Source {
-  title: string;
-  url: string;
-}
-
-/** Pull {results:[{title,url}]} out of a web_search tool result string. */
 function sourcesFrom(resultJson: string): Source[] {
   try {
     const parsed = JSON.parse(resultJson) as { results?: { title?: string; url?: string }[] };
@@ -76,77 +90,78 @@ function sourcesFrom(resultJson: string): Source[] {
   }
 }
 
-function domainOf(url: string): string {
-  const m = /^https?:\/\/(?:www\.)?([^/]+)/i.exec(url);
-  return m?.[1] ?? url;
-}
-
-
-// Seeded with time so Fast Refresh (which resets module state) can never
-// mint ids that collide with items already in React state.
 let idCounter = 0;
 const idSeed = Date.now().toString(36);
 const nextId = () => `i${idSeed}_${++idCounter}`;
 
 const registry = getToolRegistry();
 
-const SUGGESTIONS = [
-  'Turn on the flashlight',
-  'Set a timer for 5 minutes',
-  "What's Drake's latest song?",
-  'How much battery do I have?',
+interface Capability {
+  title: string;
+  blurb: string;
+  examples: string[];
+}
+
+const CAPABILITIES: Capability[] = [
+  { title: 'Phone', blurb: 'Torch, brightness, battery, apps', examples: ['Turn on the flashlight', 'How much battery do I have?', 'Open Spotify'] },
+  { title: 'Calendar', blurb: 'Reads your day, finds gaps, books', examples: ['What have I got tomorrow?', 'Find me an hour for the gym tomorrow afternoon and put it in'] },
+  { title: 'Remember', blurb: 'Facts that stay on this phone', examples: ['Remember that my locker code is 4471', 'What did I tell you about Thursday?'] },
+  { title: 'Later', blurb: 'It checks back on its own', examples: ['In 20 minutes check my battery and tell me if it dropped', 'Tonight at 9 remind me to charge my phone'] },
+  { title: 'Teach', blurb: 'Your own phrases, replayed instantly', examples: ['New rule: when I say wind down, set brightness to 20 percent and turn the flashlight off'] },
+  { title: 'Look up', blurb: 'Web search with sources', examples: ['Who won the last Monaco Grand Prix?', 'What time does the sun set today in London?'] },
 ];
 
 function approvalSummary(call: ToolCall): { title: string; detail: string } {
   const a = call.arguments;
   switch (call.name) {
     case 'send_email':
-      return {
-        title: `Email ${String(a['to'] ?? '')}`,
-        detail: `${a['subject'] ? `${String(a['subject'])} — ` : ''}${String(a['body'] ?? '')}`,
-      };
+      return { title: `Email ${String(a['to'] ?? '')}`, detail: `${a['subject'] ? `${String(a['subject'])} — ` : ''}${String(a['body'] ?? '')}` };
     case 'send_sms':
       return { title: `Text ${String(a['to'] ?? '')}`, detail: String(a['body'] ?? '') };
     case 'make_call':
       return { title: `Call ${String(a['to'] ?? '')}`, detail: '' };
     default:
-      return { title: verbFor(call), detail: '' };
+      return { title: verbFor(call), detail: JSON.stringify(call.arguments).slice(0, 160) };
   }
 }
 
-export default function ChatScreen({
-  onOpenModels,
-  onOpenRehearsal,
-  onOpenSettings,
-  onOpenHistory,
-  onOpenTools,
-}: {
-  onOpenModels?: () => void;
-  onOpenRehearsal?: () => void;
-  onOpenSettings?: () => void;
-  onOpenHistory?: () => void;
-  onOpenTools?: () => void;
-}): React.JSX.Element {
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
+}
+
+export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => void }): React.JSX.Element {
+  const p = usePalette();
+  const insets = useSafeAreaInsets();
   const activeModelId = useModelStore((s) => s.activeModelId);
+  const engineState = useModelStore((s) => s.engineState);
   const remote = useSettingsStore((s) => s.remote);
   const requireApprovals = useSettingsStore((s) => s.requireApprovals);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
-  const [working, setWorking] = useState(false);
+  const [coreState, setCoreState] = useState<CoreState>('idle');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [models, setModels] = useState<ModelSpec[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<Item>>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [voiceDetail, setVoiceDetail] = useState('');
   const [attachment, setAttachment] = useState<{ path: string; name: string } | null>(null);
+  const [toolsEnabled, setToolsEnabled] = useState(true);
+  const toolsEnabledRef = useRef(toolsEnabled);
+  toolsEnabledRef.current = toolsEnabled;
   const voiceRef = useRef<VoicePipeline | null>(null);
 
-  const scrollDown = () =>
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  useEffect(() => {
+    void allModels().then(setModels);
+  }, []);
+  const modelSpec = models.find((m) => m.id === activeModelId);
+
+  const scrollDown = () => requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
 
   // Session switching: a new/reopened session replaces the visible transcript.
-  // Restored runs render as plain text — rails and approvals are live-run UI.
   useEffect(() => {
     let stale = false;
     void useSessionStore
@@ -155,18 +170,24 @@ export default function ChatScreen({
       .then((transcript) => {
         if (stale) return;
         setItems(
-          transcript.map((m): Item => {
+          transcript.flatMap((m): Item[] => {
             if (m.kind === 'sources') {
-              let sources: Source[] = [];
               try {
-                sources = JSON.parse(m.data ?? '[]') as Source[];
+                return [{ kind: 'sources', id: nextId(), sources: JSON.parse(m.data ?? '[]') as Source[] }];
               } catch {
-                sources = [];
+                return [];
               }
-              return { kind: 'sources', id: nextId(), sources };
+            }
+            if (m.kind === 'rail-summary') {
+              try {
+                const parsed = JSON.parse(m.data ?? '{}') as { ops?: Operation[]; footer?: ReceiptFooter };
+                return [{ kind: 'receipt', id: nextId(), ops: parsed.ops ?? [], ...(parsed.footer ? { footer: parsed.footer } : {}) }];
+              } catch {
+                return [];
+              }
             }
             const kind = m.kind === 'user' || m.kind === 'scheduled' ? m.kind : 'agent';
-            return { kind, id: nextId(), text: m.text };
+            return [{ kind, id: nextId(), text: m.text }];
           }),
         );
       });
@@ -175,74 +196,173 @@ export default function ChatScreen({
     };
   }, [activeSessionId]);
 
-  const persist = (messages: SessionMessage[]) =>
-    useSessionStore.getState().appendToActive(messages);
+  const persist = (messages: SessionMessage[]) => useSessionStore.getState().appendToActive(messages);
 
   const run = useCallback(
     async (prompt: string, origin: 'user' | 'scheduled' = 'user'): Promise<string> => {
-      // Shared with the rehearsal screen and the scheduler (services/runLock).
       if (!prompt.trim() || !acquireRun()) return '';
       if (origin === 'user') setInput('');
       setRunning(true);
-      setWorking(true);
+      setCoreState('thinking');
       const abort = new AbortController();
       abortRef.current = abort;
 
-      setItems((prev) => [
-        ...prev,
-        { kind: origin === 'scheduled' ? 'scheduled' : 'user', id: nextId(), text: prompt.trim() },
-      ]);
-      persist([
-        { kind: origin === 'scheduled' ? 'scheduled' : 'user', text: prompt.trim(), atMs: Date.now() },
-      ]);
+      setItems((prev) => [...prev, { kind: origin === 'scheduled' ? 'scheduled' : 'user', id: nextId(), text: prompt.trim() }]);
+      persist([{ kind: origin === 'scheduled' ? 'scheduled' : 'user', text: prompt.trim(), atMs: Date.now() }]);
       scrollDown();
       const runStartedAt = Date.now();
       const useRemote = remote.enabled && remote.baseUrl.trim() !== '' && remote.model.trim() !== '';
-      diag(
-        `run start (${origin}) model=${useRemote ? `remote:${remote.model}` : activeModelId} prompt=${JSON.stringify(prompt.trim().slice(0, 90))}`,
-      );
+      diag(`run start (${origin}) model=${useRemote ? `remote:${remote.model}` : activeModelId} prompt=${JSON.stringify(prompt.trim().slice(0, 90))}`);
 
-      const adapter = useRemote
-        ? new RemoteAdapter({
-            baseUrl: remote.baseUrl.trim(),
-            ...(remote.apiKey.trim() ? { apiKey: remote.apiKey.trim() } : {}),
-            model: remote.model.trim(),
-          })
-        : new LocalAdapter(activeModelId);
-      const loop = new AgentLoop();
+      const finish = () => {
+        releaseRun();
+        setRunning(false);
+        setCoreState('idle');
+        abortRef.current = null;
+        setAttachment(null);
+        setAttachedImage(null);
+        scrollDown();
+      };
 
-      // Taught phrases have to be visible in the system prompt, or a bare
-      // "wind down" reads as small talk instead of a macro invocation.
-      const macros = await loadMacros().catch(() => []);
-      // One composition, shared with the headless runner and the eval rig
-      // (agent-core/routing.ts). Inlining it here is what let the rig drift
-      // from the app.
-      const { toolGroups, excludeTools, allowExecuteOnly, preamble } = composeRun(prompt, {
-        macroNames: macros.map((m) => m.name),
-        origin: origin === 'scheduled' ? 'scheduled' : 'user',
-        hasAttachment: !!attachment,
-        extraToolGroups: userToolGroups(),
-        extraExcludeTools: userExcludedTools(),
-      });
-      diag(`tool groups: ${toolGroups.join(',')}`);
-
-      let railId: string | null = null;
-      let saidAnything = false;
-      let lastOpSummary = '';
-      let finalText = '';
-      const runSources: Source[] = [];
-
-      const upsertRail = (mutate: (ops: Operation[]) => Operation[]) => {
+      let receiptId: string | null = null;
+      const upsertReceipt = (mutate: (ops: Operation[]) => Operation[], footer?: ReceiptFooter) => {
         setItems((prev) => {
-          if (railId === null) {
-            railId = nextId();
-            return [...prev, { kind: 'rail', id: railId, ops: mutate([]) }];
+          if (receiptId === null) {
+            receiptId = nextId();
+            return [...prev, { kind: 'receipt', id: receiptId, ops: mutate([]), ...(footer ? { footer } : {}) }];
           }
           return prev.map((it) =>
-            it.id === railId && it.kind === 'rail' ? { ...it, ops: mutate(it.ops) } : it,
+            it.id === receiptId && it.kind === 'receipt' ? { ...it, ops: mutate(it.ops), ...(footer ? { footer } : {}) } : it,
           );
         });
         scrollDown();
+      };
+      const persistReceipt = (ops: Operation[], footer: ReceiptFooter) =>
+        persist([{ kind: 'rail-summary', text: '', data: JSON.stringify({ ops, footer }), atMs: Date.now() }]);
+
+      const macros = await loadMacros().catch(() => []);
+      const relevantFacts = await matchingFacts(prompt).catch(() => []);
+      if (relevantFacts.length) diag(`memory: ${relevantFacts.length} relevant fact(s)`);
+      const noTools = origin === 'user' && !toolsEnabledRef.current;
+      const baseOptions = {
+        toolsByGroup: registry.byGroup(),
+        macroNames: macros.map((m) => m.name),
+        macros,
+        relevantFacts,
+        origin: origin === 'scheduled' ? ('scheduled' as const) : ('user' as const),
+        hasAttachment: !!attachment,
+        extraToolGroups: userToolGroups(),
+        extraExcludeTools: userExcludedTools(),
+      };
+
+      // ---- reflex: an unambiguous command needs no model ----
+      if (origin === 'user' && !attachment && !noTools) {
+        const full = composeRun(prompt, baseOptions);
+        const exposed = new Set(registry.list(full.toolGroups).map((t) => t.name).filter((n) => !full.excludeTools.includes(n)));
+        const reflex = matchReflex(prompt, macros.map((m) => m.name), exposed);
+        const tool = reflex ? registry.get(reflex.call.name) : undefined;
+        if (reflex && tool && !registry.requiresApproval(reflex.call)) {
+          setCoreState('acting');
+          diag(`reflex ${reflex.call.name} ${JSON.stringify(reflex.call.arguments)}`);
+          upsertReceipt(() => [{ id: reflex.call.id, verb: verbFor(reflex.call), status: 'running' }]);
+          try {
+            const raw = await tool.execute(reflex.call.arguments, { signal: abort.signal });
+            const resultText = typeof raw === 'string' ? raw : JSON.stringify(raw);
+            const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
+            const summary = resultFor(reflex.call, resultText, false);
+            const text = typeof reflex.confirm === 'function' ? reflex.confirm(parsed) : reflex.confirm;
+            const ops: Operation[] = [{ id: reflex.call.id, verb: verbFor(reflex.call), status: 'reflex', result: summary }];
+            const footer: ReceiptFooter = { steps: 1, seconds: (Date.now() - runStartedAt) / 1000, via: 'instant' };
+            upsertReceipt(() => ops, footer);
+            setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text }]);
+            persistReceipt(ops, footer);
+            persist([{ kind: 'agent', text, atMs: Date.now() }]);
+            diag(`reflex done in ${Date.now() - runStartedAt}ms`);
+            finish();
+            return text;
+          } catch (err) {
+            // The tool failed; let the model handle it with the error in view.
+            diag(`reflex failed, falling back to the model: ${err instanceof Error ? err.message : String(err)}`);
+            upsertReceipt(() => []);
+            receiptId = null;
+          }
+        }
+      }
+
+      if (!useRemote) {
+        try {
+          await useModelStore.getState().ensureLoaded();
+        } catch (err) {
+          setItems((prev) => [
+            ...prev,
+            { kind: 'notice', id: nextId(), tone: 'danger', text: `The model could not be loaded: ${err instanceof Error ? err.message : String(err)}` },
+          ]);
+          finish();
+          return '';
+        }
+      }
+      const adapter = useRemote
+        ? new RemoteAdapter({ baseUrl: remote.baseUrl.trim(), ...(remote.apiKey.trim() ? { apiKey: remote.apiKey.trim() } : {}), model: remote.model.trim() })
+        : new LocalAdapter(activeModelId);
+
+      // ---- router: decide which tools this message may see ----
+      // A short grammar-constrained pass on the same model. "none" means a
+      // plain conversation with no tools at all, which is what stops a
+      // greeting from running a taught phrase or reading the battery.
+      let categories: RouterCategory[] | undefined;
+      let routeMs = 0;
+      if (!noTools && !useRemote && !abort.signal.aborted) {
+        try {
+          const decision = await routeWithModel(new LocalAdapter(activeModelId, 'router'), prompt, abort.signal);
+          categories = effectiveCategories(decision.categories, prompt);
+          routeMs = decision.ms;
+          diag(`route ${JSON.stringify(decision.categories)}${categories ? '' : ' (overruled: action verb → all tools)'} in ${decision.ms}ms raw=${JSON.stringify(decision.raw)}`);
+        } catch (err) {
+          diag(`route failed, exposing everything: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (abort.signal.aborted) {
+        setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'muted', text: 'Stopped.' }]);
+        finish();
+        return '';
+      }
+      const composition = composeRun(prompt, { ...baseOptions, ...(categories ? { categories } : {}), noTools, toolsByGroup: registry.byGroup() });
+      const { toolGroups, excludeTools, allowExecuteOnly, allowExecuteReason, denyTools, preamble, deliberate } = composition;
+      const loop = new AgentLoop();
+      diag(`tool groups: ${toolGroups.join(',') || '(none)'}${deliberate ? ' (deliberate)' : ''}`);
+
+      let saidAnything = false;
+      let lastOpSummary = '';
+      let finalText = '';
+      let steps = 0;
+      let lastTps = 0;
+      const runSources: Source[] = [];
+      let liveId: string | null = null;
+      let rawTurn = '';
+      let liveTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const paintLive = () => {
+        liveTimer = null;
+        const { text, reasoning } = extractReasoning(rawTurn);
+        const closed = rawTurn.includes('</think>') || !rawTurn.includes('<think>');
+        setItems((prev) => {
+          const clean = text.replace(/<\|tool_call_start\|>[\s\S]*$/, '').replace(/\[[a-z_]+\([\s\S]*$/, '');
+          if (liveId === null) {
+            liveId = nextId();
+            return [...prev, { kind: 'live', id: liveId, text: clean, reasoning, startedAt: Date.now(), thinkingDone: closed }];
+          }
+          return prev.map((it) => (it.id === liveId && it.kind === 'live' ? { ...it, text: clean, reasoning, thinkingDone: closed } : it));
+        });
+        scrollDown();
+      };
+      const dropLive = () => {
+        if (liveTimer) clearTimeout(liveTimer);
+        liveTimer = null;
+        if (liveId !== null) {
+          const id = liveId;
+          liveId = null;
+          setItems((prev) => prev.filter((it) => it.id !== id));
+        }
       };
 
       const askApproval = (call: ToolCall): Promise<boolean> =>
@@ -257,13 +377,7 @@ export default function ChatScreen({
               title,
               detail,
               resolve: (ok: boolean) => {
-                setItems((p) =>
-                  p.map((it) =>
-                    it.id === id && it.kind === 'approval'
-                      ? { ...it, resolved: ok ? 'yes' : 'no' }
-                      : it,
-                  ),
-                );
+                setItems((q) => q.map((it) => (it.id === id && it.kind === 'approval' ? { ...it, resolved: ok ? 'yes' : 'no' } : it)));
                 resolve(ok);
               },
             },
@@ -278,49 +392,43 @@ export default function ChatScreen({
           toolGroups,
           excludeTools,
           ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
+          ...(allowExecuteReason ? { allowExecuteReason } : {}),
+          denyTools,
           preamble,
-          // Settings can waive approval prompts; denial stays the default
-          // for anything that sends on the user's behalf.
+          deliberate,
+          policy: useRemote ? policyFor(adapter.modelId) : { ...policyFor(adapter.modelId), contextWindowTokens: engine.getInfo()?.contextTokens ?? 8192 },
           approvals: requireApprovals ? (req) => askApproval(req.call) : async () => true,
           signal: abort.signal,
         });
-        for await (const ev of events) {
-          handle(ev);
-        }
+        for await (const ev of events) handle(ev);
       } catch (err) {
-        setItems((prev) => [
-          ...prev,
-          {
-            kind: 'agent',
-            id: nextId(),
-            text: `Something went wrong: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ]);
+        dropLive();
+        setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'danger', text: `Something went wrong: ${err instanceof Error ? err.message : String(err)}` }]);
       } finally {
-        releaseRun();
-        setRunning(false);
-        setWorking(false);
-        abortRef.current = null;
-        // One attachment = one message; the tool must not see stale images.
-        setAttachment(null);
-        setAttachedImage(null);
-        scrollDown();
+        dropLive();
+        finish();
       }
       return finalText;
 
       function handle(ev: AgentEvent) {
         switch (ev.type) {
           case 'turn_started':
-            setWorking(true);
+            rawTurn = '';
+            setCoreState('thinking');
+            break;
+          case 'text_delta':
+            rawTurn += ev.text;
+            if (!liveTimer) liveTimer = setTimeout(paintLive, 120);
+            break;
+          case 'generation_stats':
+            if (ev.usage.decodeTokensPerSec) lastTps = ev.usage.decodeTokensPerSec;
+            diag(
+              `turn ${ev.turn} stats: prompt=${ev.usage.promptTokens} cached=${ev.usage.cachedTokens} out=${ev.usage.completionTokens} prefill=${ev.usage.promptTokensPerSec?.toFixed(0)}tok/s decode=${ev.usage.decodeTokensPerSec?.toFixed(1)}tok/s`,
+            );
             break;
           case 'assistant_turn':
-            setWorking(false);
-            diag(
-              `turn ${ev.turn} answered: calls=${ev.toolCallCount} text=${JSON.stringify(ev.text.slice(0, 120))}`,
-            );
-            // Prose from a tool-calling turn is usually preamble ("Let me
-            // check…") — show it only when it's the final answer-ish turn or
-            // meaningfully long.
+            dropLive();
+            diag(`turn ${ev.turn} answered: calls=${ev.toolCallCount} text=${JSON.stringify(ev.text.slice(0, 120))}`);
             if (ev.text && (ev.toolCallCount === 0 || ev.text.length > 80)) {
               saidAnything = true;
               setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text: ev.text }]);
@@ -330,100 +438,85 @@ export default function ChatScreen({
             break;
           case 'tool_call_started':
             diag(`tool ${ev.call.name} args=${JSON.stringify(ev.call.arguments).slice(0, 160)}`);
-            upsertRail((ops) => [
-              ...ops,
-              { id: ev.call.id, verb: verbFor(ev.call), status: 'running' },
-            ]);
-            setWorking(false);
+            setCoreState('acting');
+            upsertReceipt((ops) => [...ops, { id: ev.call.id, verb: verbFor(ev.call), status: 'running' }]);
             break;
-          // Declined by design (e.g. an action tool while the user is
-          // teaching a phrase). The audience should not see a red operation
-          // for something the harness chose not to run — drop the rail entry
-          // and let the model try again.
           case 'tool_call_refused':
             diag(`tool ${ev.call.name} refused: ${ev.reason}`);
-            setItems((prev) =>
-              prev.map((it) =>
-                it.kind === 'rail'
-                  ? { ...it, ops: it.ops.filter((o) => o.id !== ev.call.id) }
-                  : it,
-              ),
-            );
+            setItems((prev) => prev.map((it) => (it.kind === 'receipt' ? { ...it, ops: it.ops.filter((o) => o.id !== ev.call.id) } : it)));
             break;
           case 'tool_call_finished': {
             const summary = resultFor(ev.call, ev.result, ev.isError);
             diag(`tool ${ev.call.name} -> ${ev.isError ? 'ERROR ' : ''}${summary}`);
-            if (!ev.isError) lastOpSummary = summary;
-            if (!ev.isError && ev.call.name === 'web_search') {
-              for (const s of sourcesFrom(ev.result)) {
-                if (!runSources.some((x) => x.url === s.url)) runSources.push(s);
-              }
+            if (!ev.isError) {
+              lastOpSummary = summary;
+              steps++;
             }
-            upsertRail((ops) => {
-              const existing = ops.find((o) => o.id === ev.call.id);
-              const done: Operation = {
-                id: ev.call.id,
-                verb: verbFor(ev.call),
-                status: ev.isError ? 'error' : 'ok',
-                result: summary,
-              };
-              return existing
-                ? ops.map((o) => (o.id === ev.call.id ? done : o))
-                : [...ops, done];
+            if (!ev.isError && ev.call.name === 'web_search') {
+              for (const s of sourcesFrom(ev.result)) if (!runSources.some((x) => x.url === s.url)) runSources.push(s);
+            }
+            upsertReceipt((ops) => {
+              const done: Operation = { id: ev.call.id, verb: verbFor(ev.call), status: ev.isError ? 'error' : 'ok', result: summary };
+              return ops.some((o) => o.id === ev.call.id) ? ops.map((o) => (o.id === ev.call.id ? done : o)) : [...ops, done];
             });
-            setWorking(true);
+            setCoreState('thinking');
             break;
           }
           case 'approval_resolved':
-            if (!ev.approved) {
-              upsertRail((ops) => [
-                ...ops,
-                { id: ev.call.id, verb: verbFor(ev.call), status: 'denied', result: 'Skipped' },
-              ]);
-            }
+            if (!ev.approved) upsertReceipt((ops) => [...ops, { id: ev.call.id, verb: verbFor(ev.call), status: 'denied', result: 'Skipped' }]);
             break;
-          case 'run_finished':
-            diag(
-              `run finished reason=${ev.reason} in ${((Date.now() - runStartedAt) / 1000).toFixed(1)}s${ev.error ? ` error=${ev.error}` : ''}`,
-            );
+          case 'parse_retry':
+            diag(`retry: ${ev.reason}`);
+            break;
+          case 'run_finished': {
+            const seconds = (Date.now() - runStartedAt) / 1000;
+            void deviceHealth().then((h) => {
+              if (h.thermal === 'serious' || h.thermal === 'critical') {
+                setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'muted', text: 'The phone is warm, so answers are slower than usual. It speeds back up as it cools.' }]);
+              }
+            });
+            diag(`run finished reason=${ev.reason} in ${seconds.toFixed(1)}s${ev.error ? ` error=${ev.error}` : ''}`);
             finalText = ev.finalText || (lastOpSummary ? `Done — ${lastOpSummary.toLowerCase()}.` : '');
             if (ev.reason === 'completed' && !saidAnything && lastOpSummary) {
-              // The model acted but never spoke — close the loop honestly
-              // with the last operation's result.
               const text = `Done — ${lastOpSummary.toLowerCase()}.`;
               setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text }]);
               persist([{ kind: 'agent', text, atMs: Date.now() }]);
             }
+            if (receiptId !== null || steps > 0) {
+              const footer: ReceiptFooter = {
+                steps,
+                seconds,
+                ...(lastTps ? { tps: lastTps } : {}),
+                via: useRemote ? 'cloud' : 'on device',
+                ...(modelSpec ? { model: modelSpec.name } : {}),
+                ...(categories ? { route: `${categories.join('+')} · ${(routeMs / 1000).toFixed(1)} s` } : {}),
+              };
+              setItems((prev) => {
+                const receipt = prev.find((it) => it.id === receiptId);
+                if (receipt && receipt.kind === 'receipt') persistReceipt(receipt.ops, footer);
+                return prev.map((it) => (it.id === receiptId && it.kind === 'receipt' ? { ...it, footer } : it));
+              });
+            }
             if (ev.reason === 'completed' && runSources.length > 0) {
-              // The answer came from the web — show where. Tappable, honest.
               const sources = runSources.slice(0, 5);
               setItems((prev) => [...prev, { kind: 'sources', id: nextId(), sources }]);
-              persist([
-                { kind: 'sources', text: '', data: JSON.stringify(sources), atMs: Date.now() },
-              ]);
+              persist([{ kind: 'sources', text: '', data: JSON.stringify(sources), atMs: Date.now() }]);
             }
             if (ev.reason === 'max_turns') {
-              setItems((prev) => [
-                ...prev,
-                {
-                  kind: 'agent',
-                  id: nextId(),
-                  text: 'I ran out of steps before finishing that — try breaking it into smaller asks.',
-                },
-              ]);
+              setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'muted', text: 'I ran out of steps before finishing that. Try breaking it into smaller asks.' }]);
             } else if (ev.reason === 'error' && ev.error) {
-              setItems((prev) => [
-                ...prev,
-                { kind: 'agent', id: nextId(), text: `I hit a problem: ${ev.error}` },
-              ]);
+              setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'danger', text: `I hit a problem: ${ev.error}` }]);
+            } else if (ev.reason === 'cancelled') {
+              setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'muted', text: 'Stopped.' }]);
             }
             break;
+          }
           default:
             break;
         }
       }
     },
-    [running, activeModelId, remote, requireApprovals, attachment],
+    [activeModelId, remote, requireApprovals, attachment, modelSpec],
   );
 
   const pickImage = useCallback(async () => {
@@ -435,9 +528,7 @@ export default function ChatScreen({
     setAttachedImage(path);
   }, []);
 
-  // Voice: mic tap → listen → transcribe → same run() as typed input →
-  // speak the answer. Hands-free mode (Settings) re-arms the mic after each
-  // turn and requires the "Minimus" wake phrase so table noise can't trigger it.
+  // Voice: mic tap → listen → transcribe → same run() as typed input → speak.
   const runRef = useRef(run);
   runRef.current = run;
   const handsFree = useSettingsStore((s) => s.voiceHandsFree);
@@ -449,6 +540,7 @@ export default function ChatScreen({
       voiceRef.current = new VoicePipeline({
         onState: (state, detail) => {
           setVoiceState(state);
+          setCoreState(state === 'listening' ? 'listening' : state === 'speaking' ? 'speaking' : 'idle');
           if (detail) diag(`voice: ${state} (${detail})`);
         },
         onUtterance: (text) => {
@@ -474,18 +566,10 @@ export default function ChatScreen({
       await pipeline.stopSpeaking();
       return;
     }
-    // Tap to stop = transcribe. This used to call stop(), which threw the
-    // recording away, so unless the energy gate happened to close the
-    // utterance for you the app just sat on "listening" and nothing was ever
-    // written down.
     if (voiceState === 'listening') {
       const heard = await pipeline.stopAndTranscribe();
       if (!heard) return;
-      // Speaking IS the send. Making the user tap the arrow afterwards turns a
-      // hands-busy interaction back into a hands-on one; the transcript still
-      // renders as the user turn, so a mishearing is visible in the thread.
       const finalText = await runRef.current(heard, 'user');
-      // Asked by voice, answered by voice.
       if (finalText) await pipeline.speak(finalText);
       return;
     }
@@ -493,65 +577,161 @@ export default function ChatScreen({
     try {
       setVoiceState('preparing');
       await ensureVoiceReady((label) => setVoiceDetail(label));
-      // A deliberate tap IS the wake signal — the phrase gate only guards
-      // hands-free re-arming. The transcript lands in the composer so it can
-      // be read and edited before sending, rather than firing a run blind.
       pipeline.setRequireWake(false);
       await pipeline.start({ pushToTalk: true });
     } catch (err) {
       setVoiceState('idle');
-      const message = err instanceof Error ? err.message : String(err);
-      setItems((prev) => [...prev, { kind: 'agent', id: nextId(), text: `Voice setup failed: ${message}` }]);
+      setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'danger', text: `Voice setup failed: ${err instanceof Error ? err.message : String(err)}` }]);
     }
   }, [voiceState, getVoice]);
 
   useEffect(
     () => () => {
       voiceRef.current?.stop();
-      // Unmount (screen switch) must not leave a zombie generation running
-      // detached — abort it; the transcript is already persisted.
       abortRef.current?.abort();
     },
     [],
   );
 
   // Deferred agency: when a scheduled task comes due the scheduler runs a
-  // full agent loop through this same path, so the audience watches it think.
+  // full agent loop through this same path, so the user watches it think.
   useEffect(() => {
     scheduler.setRunner(async (instruction) => {
-      for (let waited = 0; isRunBusy() && waited < 120_000; waited += 500) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      for (let waited = 0; isRunBusy() && waited < 120_000; waited += 500) await new Promise((r) => setTimeout(r, 500));
       return run(instruction, 'scheduled');
     });
     scheduler.start();
     void scheduler.tick();
-    // Hand back to the headless runner rather than stopping the scheduler —
-    // leaving this screen must not cancel a task the user already armed.
     return () => scheduler.setRunner(runAgentHeadless);
   }, [run]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
+  // Deep links: minimus://ask?q=<text> runs the request (Shortcuts, the
+  // Action button, Back Tap, another app). minimus://open just opens.
+  useEffect(() => {
+    let handledInitial = false;
+    const handle = (url: string | null) => {
+      if (!url) return;
+      const m = /^minimus:\/\/ask\/?\?(.*)$/i.exec(url);
+      if (!m) return;
+      const params = new URLSearchParams(m[1]);
+      const q = (params.get('q') ?? params.get('prompt') ?? '').trim();
+      if (!q) return;
+      diag(`deep link ask: ${JSON.stringify(q.slice(0, 80))}`);
+      if (isRunBusy()) setInput(q);
+      else void runRef.current(q, 'user');
+    };
+    void Linking.getInitialURL().then((url) => {
+      if (!handledInitial) {
+        handledInitial = true;
+        handle(url);
+      }
+    });
+    const sub = Linking.addEventListener('url', ({ url }) => handle(url));
+    return () => sub.remove();
+  }, []);
+
+  // QA bridge handlers.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    const offAsk = registerQaHandler('ask', async (args) => {
+      const prompt = String(args['prompt'] ?? '');
+      const before = itemsRef.current.length;
+      const started = Date.now();
+      const finalText = await runRef.current(prompt, 'user');
+      await new Promise((r) => setTimeout(r, 80));
+      const added = itemsRef.current.slice(before).map((it) => {
+        switch (it.kind) {
+          case 'receipt':
+            return { kind: 'receipt', ops: it.ops.map((o) => `${o.verb} → ${o.status}${o.result ? `: ${o.result}` : ''}`), footer: it.footer };
+          case 'approval':
+            return { kind: 'approval', title: it.title, resolved: it.resolved ?? 'pending' };
+          case 'sources':
+            return { kind: 'sources', count: it.sources.length };
+          case 'live':
+            return { kind: 'live' };
+          default:
+            return { kind: it.kind, text: it.text };
+        }
+      });
+      return { finalText, seconds: (Date.now() - started) / 1000, added };
+    });
+    const offNew = registerQaHandler('newChat', async () => {
+      useSessionStore.getState().newSession();
+      return { ok: true };
+    });
+    const offApprove = registerQaHandler('approve', async (args) => {
+      const pending = itemsRef.current.find((it) => it.kind === 'approval' && !it.resolved);
+      if (!pending || pending.kind !== 'approval') return { resolved: false };
+      pending.resolve(args['ok'] !== false);
+      return { resolved: true, title: pending.title };
+    });
+    const offType = registerQaHandler('type', async (args) => {
+      setInput(String(args['text'] ?? ''));
+      return { ok: true };
+    });
+    return () => {
+      offAsk();
+      offNew();
+      offApprove();
+      offType();
+    };
+  }, []);
+
+  const engineLabel =
+    remote.enabled && remote.baseUrl.trim() && remote.model.trim()
+      ? `cloud · ${remote.model.trim()}`
+      : engineState.status === 'ready'
+        ? `${modelSpec?.name ?? activeModelId}${engineState.info.gpu ? ' · GPU' : ' · CPU'}`
+        : engineState.status === 'loading'
+          ? `loading ${Math.round(engineState.progress)}%`
+          : engineState.status === 'error'
+            ? 'model error'
+            : 'model not loaded';
+
+  const menu = useMemo(
+    () =>
+      [
+        { label: 'New chat', hint: 'Start fresh', action: () => (running ? undefined : useSessionStore.getState().newSession()) },
+        { label: 'Chats', hint: 'Earlier conversations', action: () => onOpen('history') },
+        { label: 'Memory', hint: 'What it knows, taught phrases, scheduled', action: () => onOpen('memory') },
+        { label: 'Brain', hint: engineLabel, action: () => onOpen('brain') },
+        { label: 'Tools', hint: 'What it may touch', action: () => onOpen('tools') },
+        { label: 'Settings', hint: 'Voice, approvals, cloud', action: () => onOpen('settings') },
+        { label: 'Diagnostics', hint: 'Checks, speed, logs', action: () => onOpen('diagnostics') },
+      ] as const,
+    [onOpen, engineLabel, running],
+  );
+
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      // The activity is adjustResize, so Android already shrinks the window
-      // when the keyboard opens; adding 'height' on top of that double-counts
-      // and pushes the composer off screen (seen on device: keyboard up, no
-      // composer). iOS does need explicit padding.
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <Header
-        onOpenModels={onOpenModels}
-        onOpenRehearsal={onOpenRehearsal}
-        onOpenSettings={onOpenSettings}
-        onOpenHistory={onOpenHistory}
-        onOpenTools={onOpenTools}
-        onNewChat={running ? undefined : () => useSessionStore.getState().newSession()}
-      />
+    <KeyboardAvoidingView style={[styles.root, { backgroundColor: p.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[styles.header, { paddingTop: insets.top + space(2) }]}>
+        <Pressable style={styles.brand} onPress={() => onOpen('brain')} accessibilityRole="button" accessibilityLabel="Brain">
+          <Core state={coreState} size={30} />
+          <View>
+            <Text style={[styles.wordmark, { color: p.ink }]}>minimus</Text>
+            <Text style={[styles.status, { color: engineState.status === 'error' ? p.danger : p.ink3 }]} numberOfLines={1}>
+              {engineLabel}
+            </Text>
+          </View>
+        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable onPress={() => onOpen('history')} hitSlop={8} style={[styles.headerBtn, { backgroundColor: p.surface, borderColor: p.line }]} accessibilityRole="button" accessibilityLabel="Chats">
+            <GlyphClock color={p.ink2} size={15} />
+          </Pressable>
+          <Pressable onPress={() => !running && useSessionStore.getState().newSession()} hitSlop={8} style={[styles.headerBtn, { backgroundColor: p.surface, borderColor: p.line }]} accessibilityRole="button" accessibilityLabel="New chat">
+            <GlyphPlus color={p.ink2} size={14} />
+          </Pressable>
+          <Pressable onPress={() => setMenuOpen(true)} hitSlop={8} style={[styles.headerBtn, { backgroundColor: p.surface, borderColor: p.line }]} accessibilityRole="button" accessibilityLabel="Menu">
+            <GlyphMenu color={p.ink2} size={15} />
+          </Pressable>
+        </View>
+      </View>
+
       {items.length === 0 ? (
-        <EmptyState onPick={(s) => void run(s)} />
+        <EmptyState onPick={(s) => setInput(s)} />
       ) : (
         <FlatList
           ref={listRef}
@@ -560,9 +740,11 @@ export default function ChatScreen({
           keyExtractor={(it) => it.id}
           renderItem={({ item }) => <ItemView item={item} />}
           contentContainerStyle={styles.listContent}
-          ListFooterComponent={working ? <WorkingRow /> : null}
+          keyboardDismissMode="interactive"
+          onContentSizeChange={() => running && scrollDown()}
         />
       )}
+
       <Composer
         value={input}
         onChange={setInput}
@@ -573,155 +755,91 @@ export default function ChatScreen({
         voiceDetail={voiceDetail}
         onMic={() => void onMic()}
         attachment={attachment?.name ?? null}
+        toolsEnabled={toolsEnabled}
+        onToggleTools={() => setToolsEnabled((v) => !v)}
         onAttach={() => void pickImage()}
         onClearAttachment={() => {
           setAttachment(null);
           setAttachedImage(null);
         }}
       />
+
+      <Modal transparent visible={menuOpen} animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setMenuOpen(false)}>
+          <View style={[styles.sheet, { backgroundColor: p.surface, paddingBottom: insets.bottom + space(4) }, elevation(p, 2)]}>
+            <View style={[styles.grabber, { backgroundColor: p.lineStrong }]} />
+            {menu.map((m) => (
+              <Pressable
+                key={m.label}
+                style={({ pressed }) => [styles.sheetRow, pressed && { backgroundColor: p.surface2 }]}
+                onPress={() => {
+                  setMenuOpen(false);
+                  m.action();
+                }}
+              >
+                <Text style={[styles.sheetLabel, { color: p.ink }]}>{m.label}</Text>
+                <Text style={[styles.sheetHint, { color: p.ink3 }]} numberOfLines={1}>
+                  {m.hint}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
-function Header({
-  onOpenModels,
-  onOpenRehearsal,
-  onOpenSettings,
-  onOpenHistory,
-  onOpenTools,
-  onNewChat,
-}: {
-  onOpenModels?: () => void;
-  onOpenRehearsal?: () => void;
-  onOpenSettings?: () => void;
-  onOpenHistory?: () => void;
-  onOpenTools?: () => void;
-  onNewChat?: () => void;
-}): React.JSX.Element {
-  const remote = useSettingsStore((s) => s.remote);
-  const usingRemote = remote.enabled && remote.baseUrl.trim() !== '' && remote.model.trim() !== '';
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [bubbleOn, setBubbleOn] = useState(false);
-  const toggleBubble = useCallback(async () => {
-    try {
-      if (bubbleOn) {
-        await overlay.disable();
-        setBubbleOn(false);
-      } else {
-        const on = await overlay.enable();
-        setBubbleOn(on);
-      }
-    } catch {
-      setBubbleOn(false);
-    }
-  }, [bubbleOn]);
-
-  // One status chip, one action, one menu. Everything else lives behind ⋯ —
-  // a phone header is not a toolbar.
-  const menuItems: { label: string; action?: () => void; on?: boolean }[] = [
-    ...(onOpenHistory ? [{ label: 'Chats', action: onOpenHistory }] : []),
-    ...(onOpenTools ? [{ label: 'Tools', action: onOpenTools }] : []),
-    ...(onOpenModels ? [{ label: 'Models', action: onOpenModels }] : []),
-    ...(onOpenSettings ? [{ label: 'Settings', action: onOpenSettings }] : []),
-    ...(onOpenRehearsal ? [{ label: 'Rehearsal', action: onOpenRehearsal }] : []),
-    ...(overlay.available()
-      ? [{ label: bubbleOn ? 'Floating bubble · on' : 'Floating bubble · off', action: () => void toggleBubble(), on: bubbleOn }]
-      : []),
-  ];
-
-  return (
-    <View style={styles.header}>
-      <Text style={styles.wordmark}>
-        minimus<Text style={styles.wordmarkDot}> ●</Text>
-      </Text>
-      <View style={styles.headerRight}>
-        <View style={styles.statusPill}>
-          <View style={[styles.statusDot, usingRemote && styles.statusDotCloud]} />
-          <Text style={styles.statusText}>{usingRemote ? 'cloud' : 'on-device'}</Text>
-        </View>
-        {onNewChat ? (
-          <TouchableOpacity
-            style={styles.bubbleBtn}
-            onPress={onNewChat}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="New chat"
-          >
-            <Text style={styles.headerGlyph}>＋</Text>
-          </TouchableOpacity>
-        ) : null}
-        <TouchableOpacity
-          style={styles.bubbleBtn}
-          onPress={() => setMenuOpen(true)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="More options"
-        >
-          <Text style={styles.headerGlyph}>⋯</Text>
-        </TouchableOpacity>
-      </View>
-      <Modal transparent visible={menuOpen} animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)}>
-          <View style={styles.menuSheet}>
-            {menuItems.map((item) => (
-              <TouchableOpacity
-                key={item.label}
-                style={styles.menuRow}
-                onPress={() => {
-                  setMenuOpen(false);
-                  item.action?.();
-                }}
-              >
-                <Text style={[styles.menuLabel, item.on && styles.menuLabelOn]}>{item.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </View>
-  );
-}
-
 function EmptyState({ onPick }: { onPick: (s: string) => void }): React.JSX.Element {
+  const p = usePalette();
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <View style={styles.empty}>
-      <Text style={styles.emptyMark}>
-        agent<Text style={styles.wordmarkDot}> ●</Text>
-      </Text>
-      <Text style={styles.emptyLine}>Your phone, doing things for you.{'\n'}No cloud involved.</Text>
-      <View style={styles.chips}>
-        {SUGGESTIONS.map((s) => (
-          <TouchableOpacity key={s} style={styles.chip} onPress={() => onPick(s)}>
-            <Text style={styles.chipText}>{s}</Text>
-          </TouchableOpacity>
-        ))}
+      <Text style={[styles.greeting, { color: p.ink }]}>{greeting()}</Text>
+      <Text style={[styles.emptyLine, { color: p.ink2 }]}>Your phone, doing things for you. Nothing leaves it.</Text>
+      <View style={styles.grid}>
+        {CAPABILITIES.map((c) => {
+          const active = open === c.title;
+          return (
+            <Pressable
+              key={c.title}
+              onPress={() => setOpen(active ? null : c.title)}
+              style={[styles.capCard, { backgroundColor: p.surface, borderColor: active ? p.ink : p.line }, elevation(p, 1)]}
+            >
+              <Text style={[styles.capTitle, { color: p.ink }]}>{c.title}</Text>
+              <Text style={[styles.capBlurb, { color: p.ink2 }]}>{c.blurb}</Text>
+            </Pressable>
+          );
+        })}
       </View>
-    </View>
-  );
-}
-
-function WorkingRow(): React.JSX.Element {
-  return (
-    <View style={styles.working}>
-      <LiveDot />
-      <Text style={styles.workingText}>working</Text>
+      {open ? (
+        <View style={styles.examples}>
+          <Label>try</Label>
+          {CAPABILITIES.find((c) => c.title === open)?.examples.map((e) => (
+            <Pressable key={e} onPress={() => onPick(e)} style={[styles.example, { backgroundColor: p.surface2 }]}>
+              <Text style={[styles.exampleText, { color: p.ink }]}>“{e}”</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
 
 function ItemView({ item }: { item: Item }): React.JSX.Element | null {
+  const p = usePalette();
   switch (item.kind) {
     case 'user':
       return (
-        <View style={styles.userPill}>
-          <Text style={styles.userText}>{item.text}</Text>
+        <View style={[styles.userCard, { backgroundColor: p.surface2 }]}>
+          <Text style={[styles.userText, { color: p.ink }]}>{item.text}</Text>
         </View>
       );
     case 'scheduled':
       return (
-        <View style={styles.scheduledPill}>
-          <Text style={styles.scheduledLabel}>scheduled task · running now</Text>
-          <Text style={styles.scheduledText}>{item.text}</Text>
+        <View style={[styles.scheduledCard, { backgroundColor: p.accentSoft, borderColor: p.accent }]}>
+          <Label tone="accent">scheduled · running now</Label>
+          <Text style={[styles.scheduledText, { color: p.ink }]}>{item.text}</Text>
         </View>
       );
     case 'agent':
@@ -732,39 +850,30 @@ function ItemView({ item }: { item: Item }): React.JSX.Element | null {
           </View>
         </FadeIn>
       );
+    case 'live':
+      return (
+        <View style={styles.agentBlock}>
+          {item.reasoning || !item.thinkingDone ? (
+            <ThinkingLine text={item.reasoning} seconds={(Date.now() - item.startedAt) / 1000} done={!!item.thinkingDone && item.text.length > 0} />
+          ) : null}
+          {item.text ? <AgentText text={item.text} live /> : null}
+        </View>
+      );
+    case 'notice':
+      return <Text style={[styles.notice, { color: item.tone === 'danger' ? p.danger : p.ink3 }]}>{item.text}</Text>;
     case 'sources':
       return (
         <FadeIn>
-          <View style={styles.sourcesBlock}>
-            <Text style={styles.sourcesLabel}>sources</Text>
-            {item.sources.map((s) => (
-              <TouchableOpacity
-                key={s.url}
-                style={styles.sourceRow}
-                onPress={() => void Linking.openURL(s.url).catch(() => {})}
-              >
-                <Text style={styles.sourceTitle} numberOfLines={1}>
-                  {s.title}
-                </Text>
-                <Text style={styles.sourceDomain}>{domainOf(s.url)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Sources sources={item.sources} />
         </FadeIn>
       );
-    case 'rail':
-      return <ActionRail ops={item.ops} />;
+    case 'receipt':
+      return <Receipt ops={item.ops} footer={item.footer} />;
     case 'approval':
       if (item.resolved) {
-        return (
-          <Text style={styles.approvalResolved}>
-            {item.resolved === 'yes' ? '✓ approved' : '— skipped'}
-          </Text>
-        );
+        return <Text style={[styles.notice, { color: p.ink3 }]}>{item.resolved === 'yes' ? '✓ approved' : '— skipped'}</Text>;
       }
-      return (
-        <ApprovalCard title={item.title} detail={item.detail} onDecision={item.resolve} />
-      );
+      return <ApprovalCard title={item.title} detail={item.detail} onDecision={item.resolve} />;
     default:
       return null;
   }
@@ -772,153 +881,60 @@ function ItemView({ item }: { item: Item }): React.JSX.Element | null {
 
 function FadeIn({ children }: { children: React.ReactNode }): React.JSX.Element {
   const opacity = useRef(new Animated.Value(0)).current;
-  React.useEffect(() => {
-    Animated.timing(opacity, { toValue: 1, duration: 260, useNativeDriver: true }).start();
+  useEffect(() => {
+    Animated.timing(opacity, { toValue: 1, duration: 240, useNativeDriver: true }).start();
   }, [opacity]);
   return <Animated.View style={{ opacity }}>{children}</Animated.View>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.bg0 },
+  root: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: space(4),
-    paddingVertical: space(3),
+    paddingBottom: space(3),
   },
-  wordmark: { color: color.text, fontSize: 20, fontWeight: '800', letterSpacing: 0.5 },
-  wordmarkDot: { color: color.amber, fontSize: 12 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
+  wordmark: { fontSize: 20, fontWeight: '800', letterSpacing: -0.6, lineHeight: 22 },
+  status: { fontFamily: font.mono, fontSize: 10, letterSpacing: 0.4, marginTop: 1, maxWidth: 190 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  bubbleBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: color.line,
-    backgroundColor: color.bg1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerGlyph: { color: color.faint, fontSize: 15, fontWeight: '600' },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space(1.5),
-    backgroundColor: color.bg1,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: color.line,
-    paddingHorizontal: space(2.5),
-    paddingVertical: space(1.25),
-  },
-  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: color.ok },
-  statusDotCloud: { backgroundColor: color.amber },
-  statusText: { color: color.dim, fontSize: 11, fontFamily: font.mono },
-
-  menuBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-    paddingTop: space(14),
-    paddingRight: space(4),
-  },
-  menuSheet: {
-    minWidth: 200,
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: color.line,
-    paddingVertical: space(1),
-  },
-  menuRow: { paddingHorizontal: space(4), paddingVertical: space(3) },
-  menuLabel: { color: color.text, fontSize: 15 },
-  menuLabelOn: { color: color.amber },
+  headerBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 
   list: { flex: 1 },
   listContent: { paddingHorizontal: space(4), paddingBottom: space(4), gap: space(3) },
 
-  userPill: {
+  userCard: {
     alignSelf: 'flex-end',
-    backgroundColor: color.bg2,
-    borderRadius: 18,
-    borderTopRightRadius: 6,
-    paddingHorizontal: space(3.5),
-    paddingVertical: space(2.5),
-    maxWidth: '85%',
-    marginTop: space(2),
-  },
-  userText: { color: color.text, fontSize: 15, lineHeight: 21 },
-  scheduledPill: {
-    alignSelf: 'flex-start',
-    backgroundColor: color.bg1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: color.amberDeep,
-    paddingHorizontal: space(3.5),
-    paddingVertical: space(2.5),
-    maxWidth: '92%',
-    marginTop: space(2),
-    gap: space(1),
-  },
-  scheduledLabel: {
-    color: color.amber,
-    fontFamily: font.mono,
-    fontSize: 10,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
-  },
-  scheduledText: { color: color.text, fontSize: 14, lineHeight: 20 },
-
-  agentBlock: { marginTop: space(1) },
-
-  sourcesBlock: {
-    marginTop: space(1),
-    borderLeftWidth: 2,
-    borderLeftColor: color.line,
-    paddingLeft: space(3),
-    gap: space(1.5),
-  },
-  sourcesLabel: {
-    color: color.faint,
-    fontSize: 10,
-    fontFamily: font.mono,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  sourceRow: { flexDirection: 'row', alignItems: 'baseline', gap: space(2) },
-  sourceTitle: { color: color.cyan, fontSize: 12, flexShrink: 1 },
-  sourceDomain: { color: color.faint, fontSize: 10, fontFamily: font.mono },
-
-  working: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space(2),
-    paddingVertical: space(2),
-  },
-  workingText: { color: color.faint, fontSize: 12, fontFamily: font.mono },
-
-  approvalResolved: { color: color.faint, fontSize: 12, fontFamily: font.mono },
-
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space(6) },
-  emptyMark: { color: color.text, fontSize: 40, fontWeight: '800', letterSpacing: 1 },
-  emptyLine: {
-    color: color.dim,
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginTop: space(3),
-    marginBottom: space(6),
-  },
-  chips: { gap: space(2), alignSelf: 'stretch' },
-  chip: {
-    backgroundColor: color.bg1,
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: 12,
-    paddingVertical: space(3),
+    borderRadius: radius.lg,
+    borderBottomRightRadius: radius.xs,
     paddingHorizontal: space(4),
+    paddingVertical: space(3),
+    maxWidth: '86%',
+    marginTop: space(2),
   },
-  chipText: { color: color.text, fontSize: 14 },
+  userText: { fontSize: 16, lineHeight: 22, letterSpacing: -0.2 },
+  scheduledCard: { alignSelf: 'flex-start', borderRadius: radius.md, borderWidth: 1, paddingHorizontal: space(3.5), paddingVertical: space(2.5), maxWidth: '92%', marginTop: space(2), gap: space(1) },
+  scheduledText: { fontSize: 15, lineHeight: 21 },
+  agentBlock: { marginTop: space(1), paddingRight: space(2) },
+  notice: { fontSize: 13, fontFamily: font.mono, marginTop: space(1) },
+
+  empty: { flex: 1, paddingHorizontal: space(5), paddingTop: space(6) },
+  greeting: { fontSize: 34, fontWeight: '800', letterSpacing: -1.2, lineHeight: 38 },
+  emptyLine: { fontSize: 16, lineHeight: 22, marginTop: space(2), marginBottom: space(6), letterSpacing: -0.2 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space(2.5) },
+  capCard: { width: '48%', borderRadius: radius.lg, borderWidth: 1, padding: space(3.5), gap: 3, flexGrow: 1 },
+  capTitle: { fontSize: 16, fontWeight: '700', letterSpacing: -0.3 },
+  capBlurb: { fontSize: 12, lineHeight: 16 },
+  examples: { marginTop: space(5), gap: space(2) },
+  example: { borderRadius: radius.md, paddingHorizontal: space(3.5), paddingVertical: space(3) },
+  exampleText: { fontSize: 14, lineHeight: 20 },
+
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(20,16,8,0.45)', justifyContent: 'flex-end' },
+  sheet: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingTop: space(2), paddingHorizontal: space(2) },
+  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: space(2) },
+  sheetRow: { paddingHorizontal: space(4), paddingVertical: space(3.5), borderRadius: radius.md, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: space(3) },
+  sheetLabel: { fontSize: 17, fontWeight: '600', letterSpacing: -0.3 },
+  sheetHint: { fontSize: 12, fontFamily: font.mono, flexShrink: 1, textAlign: 'right' },
 });

@@ -3,7 +3,8 @@ import { RunAnywhere, AudioInputs } from '@runanywhere/core';
 // composed voice session owns it), but the component pipeline needs raw
 // frames. Our SDK — safe until AudioCaptureManager gets a public export.
 import { AudioCaptureManager } from '../../../../node_modules/@runanywhere/core/src/Features/VoiceSession/AudioCaptureManager';
-import { registerVoiceModels, STT_MODEL_ID, TTS_MODEL_ID } from './catalog';
+import { STT_MODEL_ID, TTS_MODEL_ID } from './catalog';
+import { ensureVoiceSdk } from './sdk';
 import { diag } from './diag';
 
 /**
@@ -53,7 +54,7 @@ export async function ensureVoiceReady(
 ): Promise<void> {
   if (voiceReady) return;
   onProgress('preparing voice…');
-  await registerVoiceModels();
+  await ensureVoiceSdk();
   const downloadedIds = new Set(
     (await RunAnywhere.models.list({ downloadedOnly: true }).catch(() => [])).map((m) => m.id),
   );

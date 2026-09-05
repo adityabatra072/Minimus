@@ -140,10 +140,29 @@ function pythonishToJson(src: string): string {
  * conservative bare words (treated as strings).
  */
 function tryParsePythonicCall(src: string): ParsedCall | null {
+  // Mixed dialect: `name{"a": 1}` — the pythonic list wrapper around a JSON
+  // argument object. LFM2.5-1.2B emits this for tools whose parameters it
+  // has only seen as JSON schemas; the intent is unambiguous, so accept it.
+  const braced = /^\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*(\{[\s\S]*\})\s*$/.exec(src);
+  if (braced) {
+    try {
+      const args = JSON.parse(pythonishToJson(braced[2]!)) as unknown;
+      if (args && typeof args === 'object' && !Array.isArray(args)) {
+        return { name: braced[1]!, arguments: args as Record<string, unknown>, raw: src };
+      }
+    } catch {
+      /* fall through to the paren form */
+    }
+  }
   const m = /^\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\(([\s\S]*)\)\s*$/.exec(src);
   if (!m) return null;
   const name = m[1]!;
   const argsSrc = m[2]!;
+  // The rules' placeholder copied literally: `tool_name(flashlight(on="true"))`.
+  // The real call is the single nested one.
+  if (/^(tool_name|function_name|name)$/i.test(name) && /^\s*[A-Za-z_][A-Za-z0-9_.-]*\s*\(/.test(argsSrc)) {
+    return tryParsePythonicCall(argsSrc);
+  }
   const args: Record<string, unknown> = {};
   let i = 0;
   const n = argsSrc.length;
@@ -321,7 +340,7 @@ export function parseAssistantOutput(
     // Whole-output call attempt: the reply IS a call (nothing else). Parse it
     // even when the tool name is unknown, so validation can nudge a retry —
     // otherwise a typo'd tool name would silently become the "final answer".
-    const wholePythonic = /^\[\s*[A-Za-z_][A-Za-z0-9_.-]*\s*\([\s\S]*\)\s*\]$/.test(trimmed);
+    const wholePythonic = /^\[\s*[A-Za-z_][A-Za-z0-9_.-]*\s*[({][\s\S]*[)}]\s*\]$/.test(trimmed);
     const salvaged =
       format === 'pythonic' && !wholePythonic ? salvageUnclosedCall(trimmed, known) : null;
     if (format === 'pythonic' && wholePythonic) {

@@ -6,6 +6,8 @@
  * on-device LocalAdapter (RunAnywhere RN SDK) can map without loss.
  */
 
+import type { GenerationUsage } from './adapter.js';
+
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ToolCall {
@@ -85,6 +87,8 @@ export type AgentEvent =
    */
   | { type: 'tool_call_refused'; call: ToolCall; reason: string }
   | { type: 'parse_retry'; attempt: number; reason: string }
+  /** Engine timings for one generation (prefill, cache hits, decode speed). */
+  | { type: 'generation_stats'; turn: number; usage: GenerationUsage }
   | { type: 'compaction'; droppedMessages: number }
   | { type: 'turn_finished'; turn: number }
   | {

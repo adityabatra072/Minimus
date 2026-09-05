@@ -28,6 +28,9 @@ interface MinimusToolsNative {
     notes: string | null,
   ): Promise<string | null>;
   calendarQuery(startMillis: number, endMillis: number): Promise<CalendarEventNative[]>;
+  reminderCreate?(title: string, dueMillis: number, notes: string | null): Promise<string>;
+  notifyAt?(atMillis: number, title: string, body: string | null, identifier: string | null): Promise<string>;
+  cancelNotification?(identifier: string): Promise<void>;
 }
 
 function hhmm(ms: number): string {
@@ -75,6 +78,7 @@ export function scheduleTools(): ToolDefinition[] {
   return [
     {
       name: 'set_alarm',
+      kind: 'action',
       group: 'schedule',
       description:
         'Set an alarm clock that rings at a time of day. It only rings — it cannot check or do anything.',
@@ -95,6 +99,7 @@ export function scheduleTools(): ToolDefinition[] {
     },
     {
       name: 'set_timer',
+      kind: 'action',
       group: 'schedule',
       description:
         'Start a countdown timer that rings when it finishes. It only rings — it cannot check or do anything.',
@@ -115,6 +120,7 @@ export function scheduleTools(): ToolDefinition[] {
     },
     {
       name: 'send_notification',
+      kind: 'action',
       group: 'schedule',
       description: 'Show a notification on the phone right now',
       parameters: {
@@ -132,6 +138,7 @@ export function scheduleTools(): ToolDefinition[] {
     },
     {
       name: 'schedule_task',
+      kind: 'action',
       group: 'schedule',
       description:
         'Schedule yourself to act later: at the given time you wake up with every tool available and carry out the instruction.',
@@ -168,12 +175,42 @@ export function scheduleTools(): ToolDefinition[] {
           );
         }
         const task = await scheduler.schedule(instruction, dueAtMs);
+        // iOS suspends the app, so a task due while it is closed cannot run
+        // by itself. A notification at the due time brings the user back;
+        // the launch runs anything overdue.
+        void native()
+          .notifyAt?.(dueAtMs, 'Minimus has something to do', instruction.slice(0, 120), `task-${task.id}`)
+          .catch(() => undefined);
         return {
           ok: true,
           task_id: task.id,
           runs_at: hhmm(dueAtMs),
           in_minutes: Math.max(0, Math.round((dueAtMs - Date.now()) / 60_000)),
         };
+      },
+    },
+    {
+      name: 'create_reminder',
+      group: 'schedule',
+      kind: 'action',
+      description: 'Add an item to the Reminders app, optionally due at a time (a to-do the user can tick off)',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          when: { type: 'string', description: 'optional: "+N" minutes from now, "HH:MM", "tomorrow HH:MM", or an ISO datetime' },
+          notes: { type: 'string' },
+        },
+        required: ['title'],
+      },
+      execute: async (args) => {
+        const mod = native();
+        if (!mod.reminderCreate) throw new Error('reminders not available on this device');
+        const title = String(args['title']).trim();
+        if (!title) throw new Error('title must not be empty');
+        const dueAtMs = args['when'] ? parseWhen(String(args['when'])) : 0;
+        await mod.reminderCreate(title, dueAtMs, args['notes'] ? String(args['notes']) : null);
+        return { ok: true, reminder: title, ...(dueAtMs ? { due: hhmm(dueAtMs) } : {}) };
       },
     },
     {
@@ -228,6 +265,7 @@ export function scheduleTools(): ToolDefinition[] {
     },
     {
       name: 'calendar_create',
+      kind: 'action',
       group: 'schedule',
       description: 'Book an event or block time on the calendar',
       parameters: {

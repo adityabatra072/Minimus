@@ -24,12 +24,6 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-		<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>The agent adds events you ask for to your calendar.</string>
-	<key>NSCalendarsUsageDescription</key>
-	<string>The agent adds events you ask for to your calendar.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>spotify</string>
@@ -40,21 +34,46 @@
 		<string>camera</string>
 		<string>photos-redirect</string>
 		<string>message</string>
+		<string>tel</string>
+		<string>sms</string>
+		<string>mailto</string>
 	</array>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Attach a photo for the on-device model to look at. Images never leave this phone.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>The voice assistant listens when you tap the mic or say the wake phrase. Audio never leaves this phone.</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>The agent adds events you ask for to your calendar.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>The agent adds events you ask for to your calendar.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Look up a person you name so a message or call reaches the right number. Contacts never leave this phone.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Add reminders you ask for to the Reminders app.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Add reminders you ask for to the Reminders app.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ai.minimus.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>minimus</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The voice assistant listens when you tap the mic or say the wake phrase. Audio never leaves this phone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Attach a photo for the on-device model to look at. Images never leave this phone.</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

@@ -157,6 +157,8 @@ export const scheduler = {
 
   async cancel(id: string): Promise<void> {
     await saveAll((await loadAll()).filter((t) => t.id !== id));
+    const mod = (NativeModules as Record<string, { cancelNotification?: (id: string) => Promise<void> }>)['MinimusTools'];
+    void mod?.cancelNotification?.(`task-${id}`).catch(() => undefined);
   },
 
   /** Start the due-task poller. Safe to call more than once. */

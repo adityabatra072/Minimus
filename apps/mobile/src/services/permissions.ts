@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import { diag } from './diag';
 
 /**
@@ -12,6 +12,19 @@ import { diag } from './diag';
  * Asked once when the app is ready rather than at first tool use — a
  * permission sheet appearing mid-agent-run reads as a malfunction.
  */
+/** iOS: notifications are asked for once, at a moment a prompt is expected. */
+export async function ensureIosNotificationPermission(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  const mod = (NativeModules as Record<string, { requestNotificationPermission?: () => Promise<boolean> } | undefined>)['MinimusTools'];
+  if (!mod?.requestNotificationPermission) return;
+  try {
+    const granted = await mod.requestNotificationPermission();
+    diag(`permissions: notifications ${granted ? 'granted' : 'denied'}`);
+  } catch (err) {
+    diag(`permissions: notification request failed ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export async function ensureAndroidPermissions(): Promise<void> {
   if (Platform.OS !== 'android') return;
   const wanted: (keyof typeof PermissionsAndroid.PERMISSIONS extends never

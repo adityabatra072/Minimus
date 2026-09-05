@@ -1,14 +1,9 @@
 import React from 'react';
-import {
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { VoiceState } from '../services/voice';
-import { color, radius, space } from '../theme';
+import { elevation, font, radius, space, usePalette } from '../theme';
+import { IconButton } from '../ui/primitives';
+import { GlyphArrowUp, GlyphMic, GlyphPlus, GlyphStop, GlyphX } from '../ui/glyphs';
 
 export function Composer({
   value,
@@ -22,189 +17,141 @@ export function Composer({
   attachment,
   onAttach,
   onClearAttachment,
+  toolsEnabled = true,
+  onToggleTools,
 }: {
   value: string;
   onChange: (t: string) => void;
   onSend: () => void;
   onStop: () => void;
   running: boolean;
-  /** Current voice pipeline state — drives the mic button + placeholder. */
   voiceState?: VoiceState;
-  /** Progress label ("downloading ears 40%") shown while preparing. */
   voiceDetail?: string;
-  /** Mic tap: start listening / cancel listening / cut speech short. */
   onMic?: () => void;
-  /** Attached image filename, when one is staged for the next message. */
   attachment?: string | null;
   onAttach?: () => void;
   onClearAttachment?: () => void;
+  /** Per-message switch: off = plain conversation, the model sees no tools. */
+  toolsEnabled?: boolean;
+  onToggleTools?: () => void;
 }): React.JSX.Element {
+  const p = usePalette();
   const canSend = value.trim().length > 0 && !running;
   const voiceBusy = voiceState !== 'idle';
   const placeholder = running
     ? 'Working…'
     : voiceState === 'listening'
-      ? 'Listening…'
+      ? 'Listening — tap the mic when you are done'
       : voiceState === 'transcribing'
-        ? 'Heard you — transcribing…'
+        ? 'Heard you — writing it down…'
         : voiceState === 'speaking'
-          ? 'Speaking — tap mic to stop'
+          ? 'Speaking — tap the mic to stop'
           : voiceState === 'preparing'
             ? voiceDetail || 'Preparing voice…'
-            : 'Ask me anything';
+            : toolsEnabled
+              ? 'What should I take care of?'
+              : 'Just chat — tools are off';
   return (
     <View style={styles.wrap}>
       {attachment ? (
-        <View style={styles.attachChip}>
-          <Text style={styles.attachText} numberOfLines={1}>
-            🖼 {attachment}
+        <View style={[styles.attachChip, { backgroundColor: p.surface, borderColor: p.line }]}>
+          <Text style={[styles.attachText, { color: p.ink2 }]} numberOfLines={1}>
+            Photo · {attachment}
           </Text>
-          <TouchableOpacity
-            onPress={onClearAttachment}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Remove attachment"
-          >
-            <Text style={styles.attachClear}>✕</Text>
-          </TouchableOpacity>
+          <Pressable onPress={onClearAttachment} hitSlop={8} accessibilityRole="button" accessibilityLabel="Remove attachment">
+            <GlyphX color={p.ink3} size={12} />
+          </Pressable>
         </View>
       ) : null}
-      <View style={[styles.pill, voiceState === 'listening' && styles.pillListening]}>
-        {onAttach ? (
-          <TouchableOpacity
-            style={styles.mic}
-            onPress={onAttach}
-            disabled={running}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Attach image"
-          >
-            <Text style={styles.attachGlyph}>＋</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onMic ? (
-          <TouchableOpacity
-            style={[styles.mic, voiceBusy && styles.micOn]}
-            onPress={onMic}
-            disabled={running && !voiceBusy}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={voiceBusy ? 'Stop voice input' : 'Start voice input'}
-          >
-            <View style={[styles.micGlyph, voiceBusy && styles.micGlyphOn]} />
-          </TouchableOpacity>
-        ) : null}
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: p.surface, borderColor: voiceState === 'listening' ? p.live : p.line },
+          elevation(p, 2),
+        ]}
+      >
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: p.ink }]}
           value={value}
           onChangeText={onChange}
           placeholder={placeholder}
-          placeholderTextColor={voiceState === 'listening' ? color.amber : color.faint}
+          placeholderTextColor={voiceState === 'listening' ? p.live : p.ink3}
           editable={!running && !voiceBusy}
           onSubmitEditing={onSend}
           returnKeyType="default"
           blurOnSubmit={false}
           multiline
         />
-        {running ? (
-          <TouchableOpacity
-            style={[styles.action, styles.stop]}
-            onPress={onStop}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Stop generating"
-          >
-            <View style={styles.stopSquare} />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.action, canSend ? styles.sendOn : styles.sendOff]}
-            onPress={onSend}
-            disabled={!canSend}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Send message"
-          >
-            <Text style={[styles.arrow, !canSend && styles.arrowOff]}>↑</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.toolbar}>
+          <View style={styles.toolbarLeft}>
+            {onAttach ? (
+              <IconButton label="Attach a photo" onPress={onAttach} disabled={running} size={36}>
+                <GlyphPlus color={p.ink2} size={16} />
+              </IconButton>
+            ) : null}
+            {onMic ? (
+              <IconButton
+                label={voiceBusy ? 'Stop voice input' : 'Speak'}
+                onPress={onMic}
+                disabled={running && !voiceBusy}
+                size={36}
+                tone={voiceState === 'listening' ? 'live' : voiceState === 'speaking' ? 'accent' : 'surface'}
+              >
+                <GlyphMic color={voiceBusy ? p.onAccent : p.ink2} size={16} />
+              </IconButton>
+            ) : null}
+            {onToggleTools ? (
+              <Pressable
+                onPress={onToggleTools}
+                disabled={running}
+                hitSlop={6}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: toolsEnabled }}
+                accessibilityLabel={toolsEnabled ? 'Tools on. Tap to chat without tools' : 'Tools off. Tap to allow tools'}
+                style={[styles.toolsPill, { backgroundColor: toolsEnabled ? p.surface2 : p.accentSoft, borderColor: toolsEnabled ? p.line : p.accent }]}
+              >
+                <View style={[styles.toolsDot, { backgroundColor: toolsEnabled ? p.ok : p.accent }]} />
+                <Text style={[styles.toolsText, { color: toolsEnabled ? p.ink2 : p.accent }]}>{toolsEnabled ? 'tools' : 'chat only'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {running ? (
+            <IconButton label="Stop" onPress={onStop} tone="danger" size={36}>
+              <GlyphStop color={p.onAccent} size={12} />
+            </IconButton>
+          ) : (
+            <IconButton label="Send" onPress={onSend} disabled={!canSend} tone={canSend ? 'ink' : 'surface'} size={36}>
+              <GlyphArrowUp color={canSend ? p.bg : p.ink3} size={16} />
+            </IconButton>
+          )}
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    paddingHorizontal: space(3),
-    paddingTop: space(2),
-    paddingBottom: Platform.OS === 'ios' ? space(1) : space(3),
-    backgroundColor: color.bg0,
-  },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: color.bg1,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: color.line,
-    paddingLeft: space(1.5),
-    paddingRight: space(1.5),
-    minHeight: 52,
-    gap: space(1.5),
-  },
-  pillListening: { borderColor: color.amber },
-  input: {
-    flex: 1,
-    color: color.text,
-    fontSize: 16,
-    maxHeight: 120,
-    paddingVertical: space(3.5),
-  },
-  mic: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: color.bg2,
-  },
-  micOn: { backgroundColor: color.amber },
-  // A simple capsule-on-stand mic glyph drawn with views — no icon deps.
-  micGlyph: {
-    width: 10,
-    height: 16,
-    borderRadius: 5,
-    backgroundColor: color.faint,
-  },
-  micGlyphOn: { backgroundColor: color.bg0 },
-  attachGlyph: { color: color.faint, fontSize: 18, fontWeight: '600' },
+  wrap: { paddingHorizontal: space(3), paddingTop: space(1), paddingBottom: Platform.OS === 'ios' ? space(1) : space(3) },
+  card: { borderRadius: radius.xl, borderWidth: 1, paddingHorizontal: space(3), paddingTop: space(2), paddingBottom: space(2), gap: space(1) },
+  input: { fontSize: 17, lineHeight: 23, maxHeight: 140, paddingHorizontal: space(1.5), paddingVertical: space(2), letterSpacing: -0.2 },
+  toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  toolbarLeft: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  hint: { fontFamily: font.mono, fontSize: 10, letterSpacing: 1, textTransform: 'uppercase', marginLeft: space(1) },
+  toolsPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space(2.5), height: 30, marginLeft: space(1) },
+  toolsDot: { width: 6, height: 6, borderRadius: 3 },
+  toolsText: { fontFamily: font.mono, fontSize: 10, letterSpacing: 1, textTransform: 'uppercase' },
   attachChip: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
     gap: space(2),
-    backgroundColor: color.bg1,
     borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: radius.chip,
+    borderRadius: radius.pill,
     paddingHorizontal: space(3),
     paddingVertical: space(1.5),
     marginBottom: space(2),
+    marginLeft: space(2),
     maxWidth: '80%',
   },
-  attachText: { color: color.dim, fontSize: 12, flexShrink: 1 },
-  attachClear: { color: color.faint, fontSize: 13 },
-  action: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendOn: { backgroundColor: color.amber },
-  sendOff: { backgroundColor: color.bg2 },
-  arrow: { color: color.bg0, fontSize: 20, fontWeight: '700', marginTop: -2 },
-  arrowOff: { color: color.faint },
-  stop: { backgroundColor: color.bg2, borderWidth: 1, borderColor: color.danger },
-  stopSquare: { width: 12, height: 12, borderRadius: 2, backgroundColor: color.danger },
+  attachText: { fontSize: 12, flexShrink: 1 },
 });

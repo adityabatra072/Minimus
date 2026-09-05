@@ -6,9 +6,9 @@ import type {
   ToolCall,
 } from './types.js';
 import type { ModelAdapter } from './adapter.js';
-import { ToolRegistry } from './tools.js';
+import { ToolRegistry, type ToolDefinition } from './tools.js';
 import { parseAssistantOutput, toToolCall } from './parsing.js';
-import { buildSystemPrompt, retryNudge } from './prompts.js';
+import { buildContextBlock, buildSystemPrompt, retryNudge, splitPreamble } from './prompts.js';
 import { policyFor, type ModelPolicy } from './policy.js';
 
 /**
@@ -48,9 +48,26 @@ export interface AgentRunConfig {
    * actions, dimming the screen and toggling the torch mid-lesson).
    */
   allowExecuteOnly?: string[];
+  /** What the model is told when a call falls outside allowExecuteOnly. */
+  allowExecuteReason?: string;
+  /**
+   * Tools that stay visible (the system prompt never changes shape, so the
+   * engine can cache it) but are refused at execution this run, each with the
+   * reason the model reads. This is how the deterministic guards steer a
+   * small model without rewriting its prompt.
+   */
+  denyTools?: Record<string, string>;
   policy?: ModelPolicy;
   /** App-supplied persona/context line(s) for the system prompt. */
   preamble?: string;
+  /**
+   * The request needs judgment: a thinking model deliberates on every turn.
+   * Otherwise (adaptive strategy) fast turns run with thinking closed and the
+   * loop escalates to open thinking only when a fast turn goes wrong.
+   */
+  deliberate?: boolean;
+  /** Clock for the context block — defaults to now; fixed in tests. */
+  now?: Date;
   approvals?: ApprovalHandler;
   onCheckpoint?: (cp: RunCheckpoint) => void | Promise<void>;
   signal?: AbortSignal;
@@ -62,6 +79,13 @@ export interface AgentRunConfig {
 }
 
 const APPROX_CHARS_PER_TOKEN = 4;
+
+/**
+ * Prose a small model emits INSTEAD of a tool call: announcing the action, or
+ * denying it has the tool. Checked only on a fast first turn (see loop).
+ */
+const NARRATION_RE =
+  /\b(I(?:'ll| will| am| have|'ve|'m going to) (?:now |just )?(?:go ahead and )?(?:set|turn|check|send|open|schedul|remind|play|add|creat|start|sav|look|search|dim|increas|decreas|adjust|retriev|fetch|not|do|note))|\blet me\b|\bI (?:don't|do not|can't|cannot) (?:have|access|do|set|schedule|store|retrieve|check)\b|\bI'm unable\b|\bI am unable\b/i;
 
 function estimateTokens(messages: ChatMessage[]): number {
   let chars = 0;
@@ -82,8 +106,8 @@ function estimateTokens(messages: ChatMessage[]): number {
  */
 function compact(messages: ChatMessage[], keepRecent = 6): number {
   let dropped = 0;
-  const cutoff = Math.max(2, messages.length - keepRecent);
-  for (let i = 1; i < cutoff; i++) {
+  const cutoff = Math.max(3, messages.length - keepRecent);
+  for (let i = 2; i < cutoff; i++) {
     const m = messages[i]!;
     if (m.role === 'tool' && m.content.length > 200 && !m.content.startsWith('[elided')) {
       m.content = `[elided tool result: ${m.toolName}, ${m.content.length} chars]`;
@@ -91,7 +115,7 @@ function compact(messages: ChatMessage[], keepRecent = 6): number {
     }
   }
   if (dropped === 0) {
-    for (let i = 2; i < cutoff; i++) {
+    for (let i = 3; i < cutoff; i++) {
       const m = messages[i]!;
       if (m.role === 'assistant' && m.content.length > 400 && !m.content.startsWith('[elided')) {
         m.content = `[elided earlier answer, ${m.content.length} chars]`;
@@ -102,12 +126,49 @@ function compact(messages: ChatMessage[], keepRecent = 6): number {
   return dropped;
 }
 
+/**
+ * `[define_macro(name='x', steps=[{...}, {'tool': 'send_not` — a call to a
+ * known tool whose brackets never close. The simple regex misses it because a
+ * `]` inside the arguments looks like the list's end.
+ */
+function unbalancedKnownCall(text: string, known: string[]): boolean {
+  const m = /^\s*\[?\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\(/.exec(text);
+  if (!m || !known.includes(m[1]!)) return false;
+  let depth = 0;
+  let quote: string | null = null;
+  for (const c of text) {
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+  }
+  return depth > 0 || quote !== null;
+}
+
 function capToolResult(result: string, cap: number): string {
   if (result.length <= cap) return result;
   return result.slice(0, cap) + `\n[truncated ${result.length - cap} chars]`;
 }
 
 export class AgentLoop {
+  /**
+   * The exact system prompt a run with these tools uses. The router pass and
+   * the warm-up build theirs through this same function so the engine sees
+   * one prefix all session long.
+   */
+  static systemPromptFor(tools: ToolDefinition[], policy: ModelPolicy, preamble?: string): string {
+    return buildSystemPrompt(tools, {
+      format: policy.format,
+      ...(policy.toolFormat ? { toolFormat: policy.toolFormat } : {}),
+      thinking: policy.thinking,
+      oneToolPerTurn: policy.oneToolPerTurn,
+      ...(preamble !== undefined ? { preamble: splitPreamble(preamble).persona } : {}),
+    });
+  }
+
   /**
    * Run one agent task. Yields UI-renderable events; the final event is always
    * `run_finished`. The transcript (for persistence/resume) is available on the
@@ -123,11 +184,7 @@ export class AgentLoop {
       .filter((t) => !excluded.has(t.name));
     const knownToolNames = exposedTools.map((t) => t.name);
 
-    const systemPrompt = buildSystemPrompt(exposedTools, {
-      format: policy.format,
-      oneToolPerTurn: policy.oneToolPerTurn,
-      ...(config.preamble !== undefined ? { preamble: config.preamble } : {}),
-    });
+    const systemPrompt = AgentLoop.systemPromptFor(exposedTools, policy, config.preamble);
 
     let messages: ChatMessage[];
     let startTurn: number;
@@ -135,12 +192,46 @@ export class AgentLoop {
       messages = structuredClone(config.resumeFrom.messages);
       startTurn = config.resumeFrom.turn;
     } else {
+      // The clock and the per-request steering ride in a SECOND system turn
+      // between the stable prompt and the user's message: the stable prompt
+      // stays byte-identical across requests (the engine serves it from its
+      // cache), and the model does not mistake the steering for the user's
+      // words. Rig evidence for the latter: with the block inside the user
+      // turn, a taught phrase got named "Current date/time: 2026-09-05…".
+      const contextBlock = buildContextBlock(splitPreamble(config.preamble).context, config.now);
       messages = [
         { role: 'system', content: systemPrompt },
+        { role: 'system', content: contextBlock },
         { role: 'user', content: userInput },
       ];
       startTurn = 0;
     }
+
+    // Adaptive thinking: plain requests get a closed think block (the model
+    // answers at once); the loop reopens thinking after any fast turn that
+    // misfires. Deliberate requests think from the start.
+    // Adaptive thinking (rig-measured): a thinking model DECIDES with the
+    // block open — closing it on the first turn cost tool-choice accuracy
+    // (recall→remember, send_sms→send_notification, search loops). What it
+    // does not need to think about is the sentence after an action tool
+    // succeeded; that turn runs closed and takes under a second.
+    const adaptive = policy.thinking && (policy.thinkingStrategy === 'adaptive' || policy.thinkingStrategy === 'adaptive-fast');
+    // 'adaptive-fast': the first decision also runs closed unless the request
+    // was flagged as needing judgment; the router and the guards already
+    // narrowed what can run. Escalation to open thinking still happens on any
+    // misfire (validation failure, narration, refusal).
+    const fast = policy.thinkingStrategy === 'adaptive-fast';
+    // Nothing to decide when there are no tools: a conversation turn runs
+    // with thinking closed and answers in a second.
+    const nothingRunnable = exposedTools.length === 0 || (config.allowExecuteOnly !== undefined && config.allowExecuteOnly.length === 0);
+    let thinkNext: 'open' | 'closed' = adaptive && (nothingRunnable || fast) && !config.deliberate ? 'closed' : 'open';
+    let narrationNudged = false;
+    /** Tools refused for the rest of the run after a runaway streak. */
+    const exhausted = new Set<string>();
+    /** Total calls per tool this run; alternating two tools dodges the streak. */
+    const callsPerTool = new Map<string, number>();
+    const MAX_CALLS_PER_TOOL = 3;
+    let overruledOnce = false;
 
     yield { type: 'run_started', runId };
 
@@ -183,6 +274,12 @@ export class AgentLoop {
         const stream = config.adapter.generate(messages, {
           temperature: policy.temperature,
           topP: policy.topP,
+          ...(policy.topK !== undefined ? { topK: policy.topK } : {}),
+          ...(policy.repeatPenalty !== undefined ? { repeatPenalty: policy.repeatPenalty } : {}),
+          ...(policy.thinking && thinkNext === 'open' && policy.thinkingBudgetTokens !== undefined
+            ? { thinkingBudgetTokens: policy.thinkingBudgetTokens }
+            : {}),
+          thinkingMode: policy.thinking ? thinkNext : 'none',
           maxOutputTokens: policy.maxOutputTokens,
           ...(config.signal ? { signal: config.signal } : {}),
         });
@@ -190,6 +287,8 @@ export class AgentLoop {
           if (ev.type === 'delta') {
             raw += ev.text;
             yield { type: 'text_delta', text: ev.text };
+          } else if (ev.type === 'done' && ev.usage) {
+            yield { type: 'generation_stats', turn, usage: ev.usage };
           }
         }
         // Adapters end the stream cleanly on abort (no throw), so a cancelled
@@ -224,10 +323,11 @@ export class AgentLoop {
       const truncatedCall =
         parsed.calls.length === 0 &&
         (policy.format === 'pythonic'
-          ? /\[\s*[a-zA-Z_]\w*\s*\([^\]]*$/.test(parsed.text)
+          ? /\[\s*[a-zA-Z_]\w*\s*\([^\]]*$/.test(parsed.text) || unbalancedKnownCall(parsed.text, knownToolNames)
           : /<tool_call>(?![\s\S]*<\/tool_call>)/.test(parsed.text));
       if (truncatedCall) {
         parseRetriesThisTurn++;
+        thinkNext = 'open';
         if (parseRetriesThisTurn > maxParseRetries) {
           yield {
             type: 'run_finished',
@@ -294,6 +394,8 @@ export class AgentLoop {
             role: 'system',
             content: buildSystemPrompt(exposedTools, {
               format: policy.format,
+              ...(policy.toolFormat ? { toolFormat: policy.toolFormat } : {}),
+              thinking: policy.thinking,
               oneToolPerTurn: policy.oneToolPerTurn,
               omitHints: true,
               ...(config.preamble !== undefined ? { preamble: config.preamble } : {}),
@@ -313,12 +415,40 @@ export class AgentLoop {
         toolCallCount: parsed.calls.length,
       };
 
+      // A fast (closed-think) first turn that DESCRIBES the action instead of
+      // calling a tool, or claims it has no such tool: rig evidence on
+      // LFM2.5 is "I'll check your battery level right now." followed by EOS.
+      // Reopen thinking and ask for the call, once.
+      if (
+        adaptive &&
+        thinkNext === 'closed' &&
+        !narrationNudged &&
+        !nothingRunnable &&
+        parsed.calls.length === 0 &&
+        toolsSucceeded === 0 &&
+        exposedTools.length > 0 &&
+        NARRATION_RE.test(parsed.text)
+      ) {
+        narrationNudged = true;
+        thinkNext = 'open';
+        messages.push({ role: 'assistant', content: parsed.text, ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}) });
+        messages.push({
+          role: 'user',
+          content:
+            'You described an action instead of performing it. If a listed tool does this, call it now with the exact syntax; otherwise answer the question directly.',
+        });
+        yield { type: 'parse_retry', attempt: 1, reason: 'narrated instead of acting' };
+        yield { type: 'turn_finished', turn };
+        continue;
+      }
+
       // Terminal condition: plain text, no tool call.
       if (parsed.calls.length === 0) {
         // A run must never end with a blank bubble: a turn that spent itself
         // thinking (or emitted nothing) gets ONE explicit demand to answer.
         if (parsed.text.trim() === '' && emptyAnswerNudges < maxEmptyAnswerNudges) {
           emptyAnswerNudges++;
+          thinkNext = 'open';
           messages.push({
             role: 'assistant',
             content: '',
@@ -369,6 +499,7 @@ export class AgentLoop {
         const validation = config.tools.validate(call);
         if (!validation.ok) {
           parseRetriesThisTurn++;
+          thinkNext = 'open';
           messages.push({
             role: 'tool',
             toolCallId: call.id,
@@ -391,11 +522,45 @@ export class AgentLoop {
           continue;
         }
 
+        // ---- runaway streak ----
+        if (exhausted.has(call.name)) {
+          const refusal = `${call.name} has been called too many times this run and is no longer available. Give the user your best answer from the results you already have.`;
+          messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name, content: JSON.stringify({ error: refusal }), isError: true });
+          yield { type: 'tool_call_refused', call, reason: refusal };
+          await checkpoint(turn + 1);
+          yield { type: 'turn_finished', turn };
+          continue;
+        }
+
+        // ---- per-run refusals (guards) ----
+        const denial = config.denyTools?.[call.name];
+        if (denial) {
+          messages.push({ role: 'tool', toolCallId: call.id, toolName: call.name, content: JSON.stringify({ error: denial }), isError: true });
+          yield { type: 'tool_call_refused', call, reason: denial };
+          thinkNext = 'open';
+          await checkpoint(turn + 1);
+          yield { type: 'turn_finished', turn };
+          continue;
+        }
+
         // ---- execution allowlist ----
-        if (config.allowExecuteOnly && !config.allowExecuteOnly.includes(call.name)) {
+        // The router can be wrong. When it said "none" and the model still
+        // reaches for a QUERY tool (recall, calendar_query, device_info…), the
+        // model's judgment wins: reading something is harmless and answers the
+        // question the router misfiled. ACTION tools stay refused — that is the
+        // guard that keeps "hello" from running a macro.
+        const routerOverruled =
+          config.allowExecuteOnly !== undefined &&
+          config.allowExecuteOnly.length === 0 &&
+          validation.tool.kind !== 'action' &&
+          !overruledOnce;
+        if (routerOverruled) overruledOnce = true;
+        if (config.allowExecuteOnly && !config.allowExecuteOnly.includes(call.name) && !routerOverruled) {
           const refusal =
-            `${call.name} cannot be run right now. Record it as a step inside ` +
-            `${config.allowExecuteOnly.join(' or ')} instead.`;
+            config.allowExecuteReason ??
+            (config.allowExecuteOnly.length === 0
+              ? 'No tools may be used for this message. Answer in plain conversation.'
+              : `${call.name} cannot be run right now. Use ${config.allowExecuteOnly.join(' or ')} instead, or answer directly.`);
           messages.push({
             role: 'tool',
             toolCallId: call.id,
@@ -404,6 +569,7 @@ export class AgentLoop {
             isError: true,
           });
           yield { type: 'tool_call_refused', call, reason: refusal };
+          thinkNext = 'open';
           await checkpoint(turn + 1);
           yield { type: 'turn_finished', turn };
           continue;
@@ -449,6 +615,8 @@ export class AgentLoop {
         }
 
         // ---- execute ----
+        callsPerTool.set(call.name, (callsPerTool.get(call.name) ?? 0) + 1);
+        if ((callsPerTool.get(call.name) ?? 0) >= MAX_CALLS_PER_TOOL) exhausted.add(call.name);
         yield { type: 'tool_call_started', call };
         const controller = new AbortController();
         const onAbort = () => controller.abort();
@@ -470,6 +638,12 @@ export class AgentLoop {
         if (!isError) {
           executedCalls.set(callKey, resultText);
           toolsSucceeded++;
+        }
+        // Next turn's thinking: closed after a successful ACTION unless the
+        // request needs judgment throughout; open after anything the model
+        // has to interpret.
+        if (adaptive) {
+          thinkNext = !isError && validation.tool.kind === 'action' && !config.deliberate ? 'closed' : 'open';
         }
         messages.push({
           role: 'tool',
@@ -497,6 +671,10 @@ export class AgentLoop {
           content: `You have called ${streakTool} ${streakCount} times. The results above are sufficient — do not call it again. Answer the user now.`,
         });
       }
+      // Rig evidence: a search that returns nothing useful gets called five
+      // times in a row despite the nudge. Three is the limit; after that the
+      // tool is refused for the rest of the run and the model must conclude.
+      if (streakCount >= 3) exhausted.add(streakTool);
 
       // ---- wrap-up nudge ----
       // Two turns before the cap, tell the model to conclude with what it has;

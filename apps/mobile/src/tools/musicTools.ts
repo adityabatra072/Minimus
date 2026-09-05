@@ -46,6 +46,7 @@ export function musicTools(): ToolDefinition[] {
   return [
     {
       name: 'play_music',
+      kind: 'action',
       group: 'music',
       description: 'Play a song, album or artist on Spotify (finds the exact track and starts playback)',
       parameters: {

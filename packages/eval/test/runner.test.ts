@@ -66,13 +66,13 @@ describe('runScenario', () => {
       suite: 'mini',
       scenarios: [
         demoSuite().scenarios.find((s) => s.id === 'flashlight-on')!,
-        demoSuite().scenarios.find((s) => s.id === 'no-tool-chitchat')!,
+        demoSuite().scenarios.find((s) => s.id === 'no-tool-creative')!,
       ],
     };
     // One adapter per attempt isn't supported by MockAdapter's single script,
     // so script both scenarios' turns in order.
     const adapter = new MockAdapter(
-      ['[flashlight(on=True)]', 'On.', 'The capital of France is Paris.'],
+      ['[flashlight(on=True)]', 'On.', 'Peaks hold the sky in silence,\nsnow keeps their secrets.'],
       'mock-lfm',
     );
     const report = await runSuite(suite, adapter, {});

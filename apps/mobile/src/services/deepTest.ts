@@ -8,7 +8,8 @@ import { listMemories, removeMemory } from '../tools/memoryTools';
 import { scheduler } from './scheduler';
 import { McpClient } from './mcp';
 import { ensureVoiceReady } from './voice';
-import { registerVlmModel, VLM_MODEL_ID } from './catalog';
+import { VLM_MODEL, isDownloaded } from './models';
+import { ensureVoiceSdk } from './sdk';
 import type { CheckResult } from './selfTest';
 
 /**
@@ -188,6 +189,7 @@ async function checkVoiceRoundTrip(): Promise<string> {
   // The honest end-to-end voice test without a microphone: synthesize speech
   // with the on-device TTS, then transcribe that audio with the on-device STT
   // and check the words survive the round trip.
+  await ensureVoiceSdk();
   await ensureVoiceReady(() => undefined);
   const phrase = 'turn on the flashlight';
   const audio = await RunAnywhere.tts.synthesize(phrase);
@@ -243,16 +245,11 @@ async function checkVoiceRoundTrip(): Promise<string> {
 }
 
 async function checkVisionModel(): Promise<string> {
-  await registerVlmModel();
-  const downloaded = new Set(
-    (await RunAnywhere.models.list({ downloadedOnly: true }).catch(() => [])).map((m) => m.id),
-  );
-  if (!downloaded.has(VLM_MODEL_ID)) {
+  if (!(await isDownloaded(VLM_MODEL))) {
     return 'skipped: vision model not downloaded (attach a photo once to fetch it)';
   }
-  await RunAnywhere.models.load(VLM_MODEL_ID);
   if (!getToolRegistry().get('describe_image')) throw new Error('describe_image not registered');
-  return 'vision model present and loadable';
+  return 'vision model files present';
 }
 
 const DEEP_CHECKS: { name: string; run: () => Promise<string> }[] = [

@@ -212,3 +212,27 @@ For balance: the verbatim-prompt pass-through in `build_prompt`, the
 download/extract pipeline for tar.gz model bundles, sherpa STT/TTS integration,
 the VLM path (SmolVLM via `vlm.generate`), and the ONNX/llama.cpp backend
 registration all worked as documented once reached.
+
+## Addendum (v2.0): why the language model moved to llama.rn
+
+Verified on the published 0.20.14 iOS binaries while porting:
+
+- `RABackendLLAMACPP` reads only `"context_size"` from its config; commons
+  emits `"context_length"`. Every model therefore loaded at the 2048 cap on
+  iOS, as §5 predicted, and the KV cache was cleared before each generation
+  (§2). Neither can be fixed without rebuilding the engine.
+- `RACommons` and the ONNX/Sherpa libraries export no llama or ggml symbols,
+  so llama.rn can be linked alongside them once `@runanywhere/llamacpp` is
+  removed. `RACommons` does carry a static registrar that references
+  `rac_backend_llamacpp_register`; a one-line stub returning
+  `RAC_ERROR_NOT_SUPPORTED` satisfies it (`ios/MinimusTools/RacLlamaStub.c`).
+- The RunAnywhere SDK is kept for the sherpa-onnx voice pipeline only and is
+  initialised lazily on first voice use.
+
+llama.rn 0.13 notes that mattered: `state_cache_budget_mb` enables prompt
+state checkpoints for recurrent/hybrid models (LFM2.5 prefix reuse works);
+`thinking_budget_tokens` with `thinking_forced_open` enforces the thinking cap
+in the sampler; a second `initLlama` on the same GGUF shares the mmapped
+weights, so a dedicated router context costs only its own buffers; and the
+checkpoint cache is wiped whenever a prompt with a different system section
+arrives, which is why the app keeps one system prompt per session.

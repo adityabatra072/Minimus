@@ -1,4 +1,4 @@
-import { AgentLoop } from '@minimus/agent-core';
+import { AgentLoop, policyFor } from '@minimus/agent-core';
 import { LocalAdapter } from './LocalAdapter';
 import { getToolRegistry } from '../tools';
 import { loadMacros } from '../tools/macroTools';
@@ -6,6 +6,7 @@ import { useModelStore } from '../stores/modelStore';
 import { diag } from './diag';
 import { composeRun } from './intent';
 import { userExcludedTools, userToolGroups } from './toolPlatform';
+import { engine } from './engine';
 
 /**
  * Runs an agent task with no screen attached.
@@ -19,11 +20,12 @@ import { userExcludedTools, userToolGroups } from './toolPlatform';
  * a message on the user's behalf while they're looking at another screen.
  */
 export async function runAgentHeadless(instruction: string): Promise<string> {
+  await useModelStore.getState().ensureLoaded();
   const modelId = useModelStore.getState().activeModelId;
   const macros = await loadMacros().catch(() => []);
   // Same composition the chat screen uses (agent-core/routing.ts): a
   // scheduled run is the same agent, and it can itself defer again.
-  const { toolGroups, excludeTools, allowExecuteOnly, preamble } = composeRun(instruction, {
+  const { toolGroups, excludeTools, allowExecuteOnly, allowExecuteReason, denyTools, preamble, deliberate } = composeRun(instruction, {
     macroNames: macros.map((m) => m.name),
     origin: 'scheduled',
     extraToolGroups: userToolGroups(),
@@ -32,13 +34,18 @@ export async function runAgentHeadless(instruction: string): Promise<string> {
 
   diag(`headless run start: ${JSON.stringify(instruction.slice(0, 90))}`);
   let finalText = '';
+  const policy = { ...policyFor(modelId), contextWindowTokens: engine.getInfo()?.contextTokens ?? 8192 };
   for await (const ev of new AgentLoop().run(instruction, {
     adapter: new LocalAdapter(modelId),
     tools: getToolRegistry(),
     toolGroups,
     excludeTools,
     ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
+    ...(allowExecuteReason ? { allowExecuteReason } : {}),
+    denyTools,
     preamble,
+    deliberate,
+    policy,
     approvals: async () => false,
   })) {
     if (ev.type === 'tool_call_started') diag(`headless tool ${ev.call.name}`);

@@ -33,6 +33,10 @@ const CANNED: Record<string, unknown> = {
   make_call: { ok: true, status: 'dialing' },
   clipboard_write: { ok: true },
   send_notification: { ok: true },
+  find_contact: { matches: [{ name: 'Sam Rivera', phones: ['+1 555 0100 (mobile)'], emails: ['sam@example.com'] }] },
+  open_url: { ok: true, opened: 'https://example.com' },
+  clipboard_read: { text: 'Trattoria da Enzo, via dei Vascellari 29', empty: false },
+  create_reminder: { ok: true, reminder: 'charge phone', due: '21:00' },
   run_js: { output: '42' },
   remember: { ok: true, remembered: true },
   recall: {
@@ -125,6 +129,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   // ---- device group ----
   registry.register({
     name: 'flashlight',
+    kind: 'action',
     group: 'device',
     description: 'Turn the phone flashlight (torch) on or off',
     parameters: {
@@ -136,6 +141,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'set_brightness',
+    kind: 'action',
     group: 'device',
     description: 'Set screen brightness',
     parameters: {
@@ -154,6 +160,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'open_app',
+    kind: 'action',
     group: 'device',
     description: 'Open another app on the phone by name',
     parameters: {
@@ -165,6 +172,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'clipboard_write',
+    kind: 'action',
     group: 'device',
     description: 'Copy text to the clipboard',
     parameters: {
@@ -202,6 +210,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   // ---- schedule group ----
   registry.register({
     name: 'calendar_create',
+    kind: 'action',
     group: 'schedule',
     description: 'Book an event or block time on the calendar',
     parameters: {
@@ -231,6 +240,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'set_alarm',
+    kind: 'action',
     group: 'schedule',
     description:
       'Set an alarm clock that rings at a time of day. It only rings — it cannot check or do anything.',
@@ -246,6 +256,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'set_timer',
+    kind: 'action',
     group: 'schedule',
     description:
       'Start a countdown timer that rings when it finishes. It only rings — it cannot check or do anything.',
@@ -261,6 +272,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'schedule_task',
+    kind: 'action',
     group: 'schedule',
     description:
       'Schedule the assistant itself to act later: at the given time it wakes up with ALL tools (battery, web, notifications, music, …) and performs the instruction.',
@@ -280,6 +292,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   // ---- music group ----
   registry.register({
     name: 'play_music',
+    kind: 'action',
     group: 'music',
     description: 'Play a song, artist or playlist on Spotify',
     parameters: {
@@ -294,7 +307,46 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
 
   // ---- comms group (approval-gated like the real tools) ----
   registry.register({
+    name: 'find_contact',
+    group: 'comms',
+    description: 'Look up a person in the phone contacts by name; returns their phone numbers and emails',
+    parameters: { type: 'object', properties: { name: { type: 'string', description: 'first name, full name or nickname' } }, required: ['name'] },
+    execute: record('find_contact'),
+  });
+  registry.register({
+    name: 'open_url',
+    group: 'device',
+    kind: 'action',
+    description: 'Open a web address in the browser, or a maps search like "maps:coffee near me"',
+    parameters: { type: 'object', properties: { url: { type: 'string', description: 'https://… link, or "maps:<place or query>" to open Maps' } }, required: ['url'] },
+    execute: record('open_url'),
+  });
+  registry.register({
+    name: 'clipboard_read',
+    group: 'device',
+    description: 'Read the text currently on the clipboard',
+    parameters: { type: 'object', properties: {} },
+    execute: record('clipboard_read'),
+  });
+  registry.register({
+    name: 'create_reminder',
+    group: 'schedule',
+    kind: 'action',
+    description: 'Add an item to the Reminders app, optionally due at a time (a to-do the user can tick off)',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        when: { type: 'string', description: 'optional: "+N" minutes from now, "HH:MM", "tomorrow HH:MM", or an ISO datetime' },
+        notes: { type: 'string' },
+      },
+      required: ['title'],
+    },
+    execute: record('create_reminder'),
+  });
+  registry.register({
     name: 'send_email',
+    kind: 'action',
     group: 'comms',
     description: 'Compose and send an email',
     parameters: {
@@ -311,6 +363,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'send_sms',
+    kind: 'action',
     group: 'comms',
     description: 'Send a text message',
     parameters: {
@@ -326,6 +379,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'make_call',
+    kind: 'action',
     group: 'comms',
     description: 'Start a phone call',
     parameters: {
@@ -338,6 +392,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'send_notification',
+    kind: 'action',
     group: 'schedule',
     description: 'Show a local notification now or at a time',
     parameters: {
@@ -369,7 +424,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   // ---- memory (on-device personal context) ----
   registry.register({
     name: 'remember',
-    group: 'core',
+    kind: 'action',
+    group: 'memory',
     description: 'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
     usageHint:
       'remember stores INFORMATION to answer questions later. If the user is instead describing a phrase that should PERFORM actions ("when I say X, do Y and Z", "new rule: …"), that is define_macro, not remember.',
@@ -382,7 +438,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'recall',
-    group: 'core',
+    group: 'memory',
     description: 'Search on-device memory for previously saved facts',
     usageHint:
       'recall is for finding saved information. If the user says a phrase they TAUGHT you, that is run_macro, not recall.',
@@ -397,7 +453,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   // ---- taught verbs ----
   registry.register({
     name: 'define_macro',
-    group: 'core',
+    kind: 'action',
+    group: 'macro',
     description:
       'Record a phrase the user is teaching you, together with the actions it should perform later. Recording only — the actions do NOT happen now.',
     usageHint:
@@ -418,7 +475,8 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   });
   registry.register({
     name: 'run_macro',
-    group: 'core',
+    kind: 'action',
+    group: 'macro',
     description: 'Run a phrase the user taught earlier (performs all of its actions)',
     usageHint:
       'If the user says a short phrase they previously taught you, call run_macro with that phrase — do not perform the actions individually.',

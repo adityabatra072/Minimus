@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { FlatList, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { AgentLoop, type AgentEvent } from '@minimus/agent-core';
+import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { AgentLoop, policyFor, type AgentEvent } from '@minimus/agent-core';
+import { engine } from '../services/engine';
 import { LocalAdapter } from '../services/LocalAdapter';
 import { getToolRegistry } from '../tools';
 import { useModelStore } from '../stores/modelStore';
@@ -11,11 +12,13 @@ import { acquireRun, releaseRun } from '../services/runLock';
 import { verbFor } from '../services/humanize';
 import { runSelfTests, type CheckResult } from '../services/selfTest';
 import { runDeepChecks } from '../services/deepTest';
-import { color, font, radius, space } from '../theme';
+import { font, radius, space, usePalette } from '../theme';
 import { LiveDot } from '../components/LiveDot';
+import { Button, Chip, Header, Label, Screen } from '../ui/primitives';
+import { onDiag, recentDiag } from '../services/diag';
 
 /**
- * Rehearsal — runs the scenario suite against the REAL
+ * Diagnostics — runs the scenario suite against the REAL
  * agent and the REAL tools on this phone, and reports pass/fail per beat.
  *
  * It exists because a demo you haven't run end-to-end on the actual device an
@@ -111,7 +114,11 @@ interface BeatResult {
 
 const registry = getToolRegistry();
 
-export default function RehearsalScreen({ onClose }: { onClose: () => void }): React.JSX.Element {
+export default function DiagnosticsScreen({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const p = usePalette();
+  const [logs, setLogs] = useState<string[]>(() => recentDiag(40));
+  const [showLogs, setShowLogs] = useState(false);
+  React.useEffect(() => onDiag((line) => setLogs((prev) => [...prev.slice(-79), line])), []);
   const activeModelId = useModelStore((s) => s.activeModelId);
   const [results, setResults] = useState<Record<string, BeatResult>>({});
   const [busy, setBusy] = useState(false);
@@ -166,13 +173,21 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
       setResults((r) => ({ ...r, [beat.id]: { status: 'running' } }));
       diag(`REHEARSAL ▶ ${beat.id}: ${JSON.stringify(beat.utterance.slice(0, 80))}`);
 
+      try {
+        await useModelStore.getState().ensureLoaded();
+      } catch (err) {
+        inFlight.current = false;
+        releaseRun();
+        setResults((r) => ({ ...r, [beat.id]: { status: 'fail', detail: `model failed to load: ${err instanceof Error ? err.message : String(err)}` } }));
+        return false;
+      }
       const macros = await loadMacros().catch(() => []);
       // The SHIPPING composition, same as the chat screen and the scheduled
       // runner (agent-core/routing.ts). Beats used to carry a hand-written
       // toolGroups list, which meant a green rehearsal could not tell you
       // whether the app exposes the right tools — it tested the list, not the
       // router.
-      const { toolGroups, excludeTools, allowExecuteOnly, preamble } = composeRun(beat.utterance, {
+      const { toolGroups, excludeTools, allowExecuteOnly, allowExecuteReason, denyTools, preamble, deliberate } = composeRun(beat.utterance, {
         macroNames: macros.map((m) => m.name),
       });
 
@@ -192,7 +207,11 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
           toolGroups,
           excludeTools,
           ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
+          ...(allowExecuteReason ? { allowExecuteReason } : {}),
+          denyTools,
           preamble,
+          deliberate,
+          policy: { ...policyFor(activeModelId), contextWindowTokens: engine.getInfo()?.contextTokens ?? 8192 },
           approvals: async () => true,
         });
         for await (const ev of events) {
@@ -338,226 +357,117 @@ export default function RehearsalScreen({ onClose }: { onClose: () => void }): R
   }, [results, activeModelId, passCount, failCount, checks]);
 
   return (
-    <View style={styles.root}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Rehearsal</Text>
-        <TouchableOpacity onPress={onClose} hitSlop={12} disabled={busy}>
-          <Text style={[styles.close, busy && styles.closeDisabled]}>Done</Text>
-        </TouchableOpacity>
-      </View>
+    <Screen>
+      <Header title="Diagnostics" eyebrow={activeModelId} onClose={busy ? undefined : onClose} />
+      <ScrollView contentContainerStyle={styles.body}>
+        <Text style={[styles.blurb, { color: p.ink2 }]}>
+          Three layers. Checks are deterministic and instant. Deep checks touch every subsystem (voice, vision, calendar, network). Beats run the real model with the real tools, the way a person would.
+        </Text>
 
-      <Text style={styles.blurb}>
-        Runs every demo beat against the real model and real tools on this phone. Results also go to
-        the device console.
-      </Text>
-
-      <View style={styles.controls}>
-        <TouchableOpacity
-          style={[styles.runBtn, busy && styles.runBtnBusy]}
-          onPress={() => (busy ? (cancelled.current = true) : void runAll())}
-        >
-          <Text style={styles.runBtnText}>{busy ? 'Stop' : 'Run all beats'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.toggle}
-          onPress={() => void runChecks()}
-          disabled={busy || checking}
-          accessibilityRole="button"
-          accessibilityLabel="Run system checks"
-        >
-          <Text style={styles.toggleText} numberOfLines={1}>
-            {checking ? 'checking…' : 'checks'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.toggle}
-          onPress={() => void runDeep()}
-          disabled={busy || checking}
-          accessibilityRole="button"
-          accessibilityLabel="Run deep feature checks"
-        >
-          <Text style={styles.toggleText} numberOfLines={1}>
-            deep
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toggle, includeFocus && styles.toggleOn]}
-          onPress={() => setIncludeFocus((v) => !v)}
-          disabled={busy}
-        >
-          <Text
-            style={[styles.toggleText, includeFocus && styles.toggleTextOn]}
-            numberOfLines={1}
-          >
-            app-switching
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {passCount + failCount > 0 ? (
-        <View style={styles.tallyRow}>
-          <Text style={styles.tally}>
-            {passCount} passed · {failCount} failed
-          </Text>
-          <TouchableOpacity onPress={() => void shareReport()} hitSlop={10} disabled={busy}>
-            <Text style={[styles.shareBtn, busy && styles.closeDisabled]}>share report</Text>
-          </TouchableOpacity>
+        <View style={styles.controls}>
+          <Button label={busy ? 'Stop' : 'Run all beats'} kind={busy ? 'danger' : 'primary'} small onPress={() => (busy ? (cancelled.current = true) : void runAll())} />
+          <Chip label={checking ? 'checking…' : 'Checks'} onPress={busy || checking ? undefined : () => void runChecks()} />
+          <Chip label="Deep" onPress={busy || checking ? undefined : () => void runDeep()} />
+          <Chip label="App-switching beats" active={includeFocus} onPress={busy ? undefined : () => setIncludeFocus((v) => !v)} />
         </View>
-      ) : null}
 
-      <FlatList
-        data={BEATS}
-        keyExtractor={(b) => b.id}
-        contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          checks.length > 0 ? (
-            <View style={styles.checksBlock}>
-              <Text style={styles.checksLabel}>
-                system checks · {checks.filter((c) => c.ok).length}/{checks.length}
-              </Text>
-              {checks.map((c) => (
-                <View key={c.name} style={styles.checkRow}>
-                  <Text style={styles.statusGlyph}>{c.ok ? '✅' : '❌'}</Text>
-                  <View style={styles.checkMain}>
-                    <Text style={styles.checkName}>{c.name}</Text>
-                    <Text
-                      style={[styles.checkDetail, !c.ok && styles.detailFail]}
-                      numberOfLines={2}
-                    >
-                      {c.detail}
-                    </Text>
-                  </View>
+        {passCount + failCount > 0 ? (
+          <View style={[styles.tally, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <Text style={[styles.tallyText, { color: p.ink }]}>
+              {passCount} passed · {failCount} failed
+            </Text>
+            <Pressable onPress={() => void shareReport()} disabled={busy} hitSlop={8}>
+              <Text style={[styles.link, { color: busy ? p.ink3 : p.live }]}>share report</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {checks.length > 0 ? (
+          <View style={[styles.block, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <Label>
+              checks · {checks.filter((c) => c.ok).length}/{checks.length}
+            </Label>
+            {checks.map((c) => (
+              <View key={c.name} style={styles.checkRow}>
+                <View style={[styles.dot, { backgroundColor: c.ok ? p.ok : p.danger }]} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[styles.checkName, { color: p.ink }]}>{c.name}</Text>
+                  <Text style={[styles.mono, { color: c.ok ? p.ink3 : p.danger }]} numberOfLines={3}>
+                    {c.detail}
+                  </Text>
                 </View>
-              ))}
-            </View>
-          ) : null
-        }
-        renderItem={({ item }) => {
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        <Label style={{ marginLeft: space(1) }}>beats</Label>
+        {BEATS.map((item) => {
           const r = results[item.id];
           return (
-            <TouchableOpacity
-              style={styles.row}
+            <Pressable
+              key={item.id}
+              style={({ pressed }) => [styles.beat, { backgroundColor: pressed ? p.surface2 : p.surface, borderColor: r?.status === 'fail' ? p.danger : r?.status === 'pass' ? p.ok : p.line }]}
               disabled={busy}
               onPress={() => void runBeat(item)}
             >
-              <View style={styles.rowHead}>
+              <View style={styles.beatHead}>
                 <View style={styles.statusCol}>
-                  {r?.status === 'running' ? (
-                    <LiveDot />
-                  ) : (
-                    <Text style={styles.statusGlyph}>
-                      {r?.status === 'pass' ? '✅' : r?.status === 'fail' ? '❌' : '○'}
-                    </Text>
-                  )}
+                  {r?.status === 'running' ? <LiveDot /> : <View style={[styles.dot, { backgroundColor: r?.status === 'pass' ? p.ok : r?.status === 'fail' ? p.danger : p.lineStrong }]} />}
                 </View>
-                <Text style={styles.rowTitle}>{item.title}</Text>
-                {r?.seconds !== undefined ? (
-                  <Text style={styles.rowTime}>{r.seconds}s</Text>
-                ) : null}
+                <Text style={[styles.beatTitle, { color: p.ink }]}>{item.title}</Text>
+                {r?.seconds !== undefined ? <Text style={[styles.mono, { color: p.ink3 }]}>{r.seconds}s</Text> : null}
               </View>
-              <Text style={styles.utterance} numberOfLines={2}>
+              <Text style={[styles.utterance, { color: p.ink2 }]} numberOfLines={2}>
                 “{item.utterance}”
               </Text>
               {r?.detail ? (
-                <Text
-                  style={[styles.detail, r.status === 'fail' && styles.detailFail]}
-                  numberOfLines={3}
-                >
+                <Text style={[styles.mono, { color: r.status === 'fail' ? p.danger : p.ok }]} numberOfLines={3}>
                   {r.detail}
                 </Text>
               ) : item.note ? (
-                <Text style={styles.note}>{item.note}</Text>
+                <Text style={[styles.mono, { color: p.ink3 }]}>{item.note}</Text>
               ) : null}
-            </TouchableOpacity>
+            </Pressable>
           );
-        }}
-      />
-    </View>
+        })}
+
+        <Pressable onPress={() => setShowLogs((v) => !v)} style={styles.logHead}>
+          <Label style={{ marginLeft: space(1) }}>log</Label>
+          <Text style={[styles.mono, { color: p.ink3 }]}>{showLogs ? 'hide' : `show last ${logs.length}`}</Text>
+        </Pressable>
+        {showLogs ? (
+          <View style={[styles.log, { backgroundColor: p.ink, borderColor: p.ink }]}>
+            {logs.map((l, i) => (
+              <Text key={i} style={[styles.logLine, { color: p.bg }]}>
+                {l}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.bg0 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: space(4),
-    paddingVertical: space(3),
-  },
-  title: { color: color.text, fontSize: 20, fontWeight: '800' },
-  close: { color: color.amber, fontSize: 15, fontWeight: '600' },
-  closeDisabled: { color: color.faint },
-  blurb: {
-    color: color.dim,
-    fontSize: 13,
-    lineHeight: 19,
-    paddingHorizontal: space(4),
-    marginBottom: space(3),
-  },
-  controls: { flexDirection: 'row', gap: space(2), paddingHorizontal: space(4), alignItems: 'center' },
-  runBtn: {
-    backgroundColor: color.amber,
-    borderRadius: radius.chip,
-    paddingHorizontal: space(4),
-    paddingVertical: space(2.5),
-  },
-  runBtnBusy: { backgroundColor: color.bg2, borderWidth: 1, borderColor: color.danger },
-  runBtnText: { color: color.bg0, fontWeight: '700', fontSize: 14 },
-  toggle: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: color.line,
-    borderRadius: radius.chip,
-    paddingHorizontal: space(3),
-    paddingVertical: space(2.5),
-  },
-  toggleOn: { borderColor: color.amberDeep },
-  toggleText: { color: color.faint, fontSize: 11, fontFamily: font.mono },
-  toggleTextOn: { color: color.amber },
-  tallyRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: space(4),
-    paddingTop: space(3),
-  },
-  tally: {
-    color: color.dim,
-    fontFamily: font.mono,
-    fontSize: 12,
-  },
-  shareBtn: { color: color.cyan, fontFamily: font.mono, fontSize: 12 },
-  list: { padding: space(4), gap: space(2) },
-  checksBlock: {
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: color.line,
-    padding: space(3),
-    gap: space(2),
-    marginBottom: space(2),
-  },
-  checksLabel: { color: color.amber, fontSize: 11, fontFamily: font.mono, letterSpacing: 1 },
-  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space(2) },
-  checkMain: { flex: 1, gap: space(1) },
-  checkName: { color: color.text, fontSize: 13, fontWeight: '600' },
-  checkDetail: { color: color.dim, fontSize: 11, fontFamily: font.mono, lineHeight: 15 },
-  row: {
-    backgroundColor: color.bg1,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: color.line,
-    padding: space(3.5),
-    gap: space(1.5),
-  },
-  rowHead: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  statusCol: { width: 18, alignItems: 'center' },
-  statusGlyph: { fontSize: 13, color: color.faint },
-  rowTitle: { color: color.text, fontSize: 14, fontWeight: '600', flex: 1 },
-  rowTime: { color: color.cyan, fontFamily: font.mono, fontSize: 12 },
-  utterance: { color: color.dim, fontSize: 12, lineHeight: 17, fontStyle: 'italic' },
-  detail: { color: color.ok, fontSize: 12, fontFamily: font.mono, lineHeight: 17 },
-  detailFail: { color: color.danger },
-  note: { color: color.faint, fontSize: 11, fontFamily: font.mono },
+  body: { paddingHorizontal: space(4), paddingBottom: space(12), gap: space(3) },
+  blurb: { fontSize: 13, lineHeight: 19 },
+  controls: { flexDirection: 'row', flexWrap: 'wrap', gap: space(2), alignItems: 'center' },
+  tally: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space(3.5), paddingVertical: space(2.5) },
+  tallyText: { fontFamily: font.mono, fontSize: 12 },
+  link: { fontFamily: font.mono, fontSize: 12 },
+  block: { borderWidth: 1, borderRadius: radius.lg, padding: space(3.5), gap: space(2.5) },
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space(2.5) },
+  dot: { width: 7, height: 7, borderRadius: 4, marginTop: 5 },
+  checkName: { fontSize: 13, fontWeight: '600' },
+  mono: { fontFamily: font.mono, fontSize: 11, lineHeight: 15 },
+  beat: { borderWidth: 1, borderRadius: radius.lg, padding: space(3.5), gap: space(1.5) },
+  beatHead: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  statusCol: { width: 14, alignItems: 'center' },
+  beatTitle: { fontSize: 14, fontWeight: '600', flex: 1 },
+  utterance: { fontSize: 12, lineHeight: 17, fontStyle: 'italic' },
+  logHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space(3), paddingRight: space(1) },
+  log: { borderWidth: 1, borderRadius: radius.md, padding: space(3), gap: 2 },
+  logLine: { fontFamily: font.mono, fontSize: 10, lineHeight: 14 },
 });

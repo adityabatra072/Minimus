@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.authors      = "RunAnywhere AI"
   s.platforms    = { :ios => "17.5" }
   s.source       = { :path => "." }
-  s.source_files = "*.{h,m}"
-  s.frameworks   = "AVFoundation", "EventKit", "UserNotifications", "UIKit"
+  s.source_files = "*.{h,m,c}"
+  s.frameworks   = "AVFoundation", "EventKit", "UserNotifications", "UIKit", "Contacts"
   s.dependency "React-Core"
 end

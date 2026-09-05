@@ -35,6 +35,8 @@
  * schedule-only) and stalling 0/3 in chat on the same phone.
  */
 
+import { categoriesToGroups, type RouterCategory } from './router.js';
+
 const GROUP_TRIGGERS: [RegExp, string][] = [
   [/\b(play|song|music|spotify|album|playlist|track)\b/i, 'music'],
   [/\b(search|google|look up|latest|news|web|website|internet|find out|who is|what is)\b/i, 'web'],
@@ -49,11 +51,25 @@ const GROUP_TRIGGERS: [RegExp, string][] = [
   ],
   [
     /\b(remember|recall|forget|memory|what did i|what do i need|i told you|note that|save this)\b/i,
-    'core',
+    'memory',
   ],
 ];
 
 const DEFAULT_GROUPS = ['device', 'schedule', 'music'];
+
+/**
+ * A taught phrase counts as SAID only as a whole phrase on word boundaries.
+ * Substring matching made a phrase called "hi" fire on "this", and "hello"
+ * after teaching anything ran the macro (device evidence from user testing).
+ */
+export function saidPhrase(prompt: string, macroNames: string[]): string | null {
+  const lower = ` ${prompt.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  for (const name of macroNames) {
+    const n = name.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (n && lower.includes(` ${n} `)) return name;
+  }
+  return null;
+}
 
 export function routeToolGroups(prompt: string, macroNames: string[] = []): string[] {
   const groups = new Set<string>();
@@ -62,21 +78,24 @@ export function routeToolGroups(prompt: string, macroNames: string[] = []): stri
   }
   // Teaching a phrase or saying a taught one needs the macro tools (group
   // 'core'), whatever the rest of the sentence looks like.
-  const lower = prompt.toLowerCase();
-  if (TEACHING_RE.test(prompt) || macroNames.some((n) => lower.includes(n.toLowerCase()))) {
-    groups.add('core');
+  if (isTeaching(prompt) || saidPhrase(prompt, macroNames)) {
+    groups.add('macro');
   }
   if (groups.size === 0) for (const g of DEFAULT_GROUPS) groups.add(g);
   return [...groups];
 }
 
-const TEACHING_RE = /\b(new rule|when(ever)? i say|teach you|from now on,? when)\b/i;
+// Paraphrases seen on the rig: "If I ever ask for focus mode, …", "Make me a
+// shortcut called bedtime that …". Both are the user teaching a phrase.
+const TEACHING_RE =
+  /\b(new rule|when(ever)? i (say|ask for|tell you)|if i (ever )?(say|ask for|tell you)|teach you|from now on,? (when|if)|(make|create|add|set up) (me )?an? (shortcut|macro|routine|command|phrase) (called|named|for))\b/i;
 
 // Deliberately narrow: "in/after N minutes" is a deferred AGENT action, while
 // "tomorrow"/"tonight" phrasings are usually calendar territory — injecting a
 // schedule_task hint there would re-blur the schedule_task≠calendar_create
 // boundary the tool descriptions fight to keep sharp.
-const DEFERRED_RE = /\b(in|after) \d+ (seconds?|minutes?|hours?)\b/i;
+const DEFERRED_RE =
+  /\b(in|after) \d+ (seconds?|minutes?|hours?)\b|\b(tonight|tomorrow|later|this (evening|afternoon)|at \d{1,2}(:\d{2})?\s?([ap]m)?)\b[^.]*\b(check|tell me|see if|let me know|look at|compare|report)\b/i;
 
 /**
  * "Do X, then in N minutes do Y" — the deferred half must become a
@@ -84,15 +103,59 @@ const DEFERRED_RE = /\b(in|after) \d+ (seconds?|minutes?|hours?)\b/i;
  * "feels" like waiting). Rig evidence: watchdog-arm is flaky without this
  * line even at full output budget. Same proven pattern as teachingPreamble.
  */
-export function deferredPreamble(prompt: string): string | null {
+export function deferredPreamble(prompt: string, now: Date = new Date()): string | null {
   if (!DEFERRED_RE.test(prompt)) return null;
+  const clock = clockOffsetHint(prompt, now);
   return (
     'Part of this request happens LATER. Do the immediate part now with tools, ' +
     'then hand the later part to schedule_task (instruction = what to do, when = "+N" minutes from now) — ' +
     'schedule_task runs YOU again at that time to do it. Give `when` as a relative offset like "+3", ' +
     'never an absolute clock time: your own thinking takes minutes, so a timestamp you compute now is ' +
-    'already stale by the time the tool runs. After handing it off, give your short final answer.'
+    'already stale by the time the tool runs. After handing it off, give your short final answer.' +
+    (clock ? ` ${clock}` : '')
   );
+}
+
+/**
+ * "Tonight at 9" needs a `when` of "+N" minutes, and a 2.6B model computing
+ * minutes-until-nine from the clock line is where the rig saw it give up
+ * (it checked the battery and never scheduled). The harness can do that
+ * arithmetic: it reads the clock time off the sentence and says the offset.
+ */
+export function clockOffsetHint(prompt: string, now: Date): string | null {
+  const m = /\b(?:at|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b/i.exec(prompt);
+  if (!m) return null;
+  let hour = parseInt(m[1]!, 10);
+  const minute = m[2] ? parseInt(m[2], 10) : 0;
+  const ampm = m[3]?.toLowerCase().replace(/\./g, '');
+  if (hour > 23 || minute > 59) return null;
+  if (ampm === 'pm' && hour < 12) hour += 12;
+  if (ampm === 'am' && hour === 12) hour = 0;
+  const tomorrow = /\btomorrow\b/i.test(prompt);
+  const evening = /\b(tonight|this evening|evening)\b/i.test(prompt);
+  const candidate = (h: number) => {
+    const t = new Date(now);
+    if (tomorrow) t.setDate(t.getDate() + 1);
+    t.setHours(h, minute, 0, 0);
+    if (t.getTime() <= now.getTime()) t.setDate(t.getDate() + 1);
+    return t;
+  };
+  let target: Date;
+  if (ampm || hour >= 12) {
+    target = candidate(hour);
+  } else if (evening) {
+    target = candidate(hour + 12);
+  } else {
+    // No am/pm: the sooner of the two readings is the one people mean
+    // ("check again at 5" said at noon is 17:00, not tomorrow morning).
+    const a = candidate(hour);
+    const b = candidate(hour + 12);
+    target = a.getTime() <= b.getTime() ? a : b;
+  }
+  const minutes = Math.round((target.getTime() - now.getTime()) / 60_000);
+  const hh = String(target.getHours()).padStart(2, '0');
+  const mm = String(target.getMinutes()).padStart(2, '0');
+  return `The time mentioned (${hh}:${mm}) is ${minutes} minutes from now, so use when="+${minutes}".`;
 }
 
 /**
@@ -140,9 +203,8 @@ export function macroSteering(
   prompt: string,
   macroNames: string[],
 ): { exclude: string[]; line: string } | null {
-  if (TEACHING_RE.test(prompt)) return null;
-  const lower = prompt.toLowerCase();
-  const match = macroNames.find((n) => lower.includes(n.toLowerCase()));
+  if (isTeaching(prompt) || QUESTION_RE.test(prompt)) return null;
+  const match = saidPhrase(prompt, macroNames);
   if (!match) return null;
   return {
     exclude: ['define_macro'],
@@ -157,12 +219,27 @@ export function macroSteering(
  * it they pass consistently.
  */
 export function teachingPreamble(prompt: string): string | null {
-  if (!TEACHING_RE.test(prompt)) return null;
+  if (!isTeaching(prompt)) return null;
+  const phrase = extractTaughtPhrase(prompt);
   return (
     'The user is TEACHING you a phrase, not asking you to act. You MUST call ' +
     'define_macro exactly once, with the phrase as `name` and every action as a ' +
-    'step in `steps`. Do NOT perform any of the actions now.'
+    'step in `steps`. Do NOT perform any of the actions now.' +
+    (phrase ? ` The phrase to record is "${phrase}".` : '')
   );
+}
+
+/**
+ * The phrase being taught, when the sentence names it plainly. Rig evidence:
+ * "If I ever ask for focus mode, dim the screen…" made the model ask "which
+ * phrase?" because nothing was quoted; the harness can read it off the
+ * sentence deterministically.
+ */
+export function extractTaughtPhrase(prompt: string): string | null {
+  const quoted = /(?:say|ask for|tell you|called|named)\s+["“']([^"”']{2,40})["”']/i.exec(prompt);
+  if (quoted) return quoted[1]!.trim().toLowerCase();
+  const bare = /(?:when(?:ever)? i (?:say|ask for|tell you)|if i (?:ever )?(?:say|ask for|tell you)|(?:shortcut|macro|routine|command|phrase) (?:called|named|for))\s+([a-z][a-z0-9' -]{1,30}?)(?=\s*[,:;.]|\s+(?:that|which|then|to|and)\b|$)/i.exec(prompt);
+  return bare ? bare[1]!.trim().toLowerCase() : null;
 }
 
 /**
@@ -173,18 +250,33 @@ export function teachingPreamble(prompt: string): string | null {
  * from the preamble (callers check isTeaching) and run_macro hidden.
  */
 export function isTeaching(prompt: string): boolean {
-  return TEACHING_RE.test(prompt);
+  // "What did I ask you to do when I say wind down?" contains the teaching
+  // marker but is a QUESTION about a phrase. Device evidence: it was treated
+  // as teaching, define_macro was the only tool allowed, and the model
+  // overwrote the phrase with invented steps. A question is never a lesson.
+  return TEACHING_RE.test(prompt) && !QUESTION_RE.test(prompt);
 }
+
+const QUESTION_RE = /\?\s*$|^\s*(what|which|how|where|who|why|did|do|does|can|could|would|is|are|tell me|remind me what|explain)\b/i;
 
 /**
  * Every group except `vision`, which is attachment-gated (describe_image with
  * no image attached is a tool that can only be called wrongly).
  */
-export const ALL_TOOL_GROUPS = ['core', 'device', 'schedule', 'web', 'comms', 'music'];
+export const ALL_TOOL_GROUPS = ['memory', 'macro', 'device', 'schedule', 'web', 'comms', 'music'];
 
 export interface ComposeOptions {
   /** Phrases the user has taught, by name. */
   macroNames?: string[];
+  /** Full taught phrases, so a said phrase's steps can be shown to the model. */
+  macros?: { name: string; steps: { tool: string; arguments: Record<string, unknown> }[] }[];
+  /**
+   * Remembered facts that match this message (the app runs the same fuzzy
+   * recall the tool would). Injected into the context so a memory question is
+   * answered from what is already known, with no tool call and no chance of a
+   * misrouted "none" blocking it.
+   */
+  relevantFacts?: string[];
   /**
    * Route by keyword instead of exposing every group. Only for a model
    * loaded in a small context window — see the note on routeToolGroups.
@@ -197,13 +289,38 @@ export interface ComposeOptions {
   extraToolGroups?: string[];
   /** Built-ins the user switched off in Tools. */
   extraExcludeTools?: string[];
+  /**
+   * Router decision (router.ts): expose only the groups these categories
+   * unlock. ['none'] means a plain conversation with no tools. Deterministic
+   * guards (teaching, deferral, calendar placement) still add what they need.
+   */
+  categories?: RouterCategory[];
+  /** The user switched tools off for this message. */
+  noTools?: boolean;
+  /**
+   * Tool names per group, so a router decision can become an execution
+   * allowlist. The app passes its registry's grouping; the rig passes the
+   * mock registry's.
+   */
+  toolsByGroup?: Record<string, string[]>;
 }
 
 export interface RunComposition {
+  /**
+   * The request needs judgment (teaching, deferral, calendar placement, or a
+   * multi-part instruction) and a thinking model should deliberate on every
+   * turn. Simple single-action requests run with thinking closed (see
+   * policy.thinkingStrategy) and get the answer in a couple of seconds.
+   */
+  deliberate: boolean;
   toolGroups: string[];
+  /** Hidden for the session (user-disabled). */
   excludeTools: string[];
-  /** Set while teaching: the tools stay visible, only this one may run. */
+  /** Visible but refused at execution this run, with the reason the model gets. */
+  denyTools: Record<string, string>;
+  /** When set, only these may run this run (the rest are refused with allowExecuteReason). */
   allowExecuteOnly?: string[];
+  allowExecuteReason?: string;
   preamble: string;
 }
 
@@ -228,12 +345,20 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
   // for this phrase" while the teaching line says "only define_macro" — the
   // model then acts AND defines across 5-8 turns (rig: teach-devstate 0/3
   // with the line, clean without).
-  if (macroNames.length > 0 && !isTeaching(prompt)) {
+  // The taught-phrase list used to ride in EVERY prompt. It read as an
+  // invitation: after teaching one phrase, "hello" ran it. Now the list only
+  // appears when the message actually contains a taught phrase (whole words)
+  // — and an exact match never reaches the model at all (reflex.ts).
+  const said = saidPhrase(prompt, macroNames);
+  if (said && !isTeaching(prompt)) {
+    const macro = opts.macros?.find((m) => m.name.toLowerCase() === said.toLowerCase());
+    const steps = macro ? macro.steps.map((s, i) => `${i + 1}. ${s.tool}(${Object.entries(s.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`).join(' ') : '';
     lines.push(
-      `Phrases the user has taught you (run these with run_macro): ${macroNames
-        .map((n) => `"${n}"`)
-        .join(', ')}. If the user says one of them, call run_macro with that name.`,
+      `The user mentioned the taught phrase "${said}"${steps ? `, which performs: ${steps}` : ''}. If they are SAYING the phrase, call run_macro with that name; if they are asking ABOUT it, describe those steps. Do not redefine it.`,
     );
+  }
+  if (opts.relevantFacts && opts.relevantFacts.length > 0) {
+    lines.push(`Facts you remembered earlier that may be relevant: ${opts.relevantFacts.map((f) => `"${f}"`).join('; ')}. Use them to answer directly if they cover the question.`);
   }
   if (opts.origin === 'scheduled') {
     lines.push(
@@ -270,34 +395,102 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
   // exposure change. Web, comms and music can never appear in a macro step,
   // so they are pure temptation here.
   const teachingNow = isTeaching(prompt);
+  const deliberate =
+    teachingNow ||
+    DEFERRED_RE.test(prompt) ||
+    CALENDAR_PLACE_RE.test(prompt) ||
+    /\b(then|and then|after that|before|unless|isn't|is not|that is not|but not|except)\b/i.test(prompt) ||
+    prompt.split(/[,;]| and /i).length >= 3;
+
+  // ONE system prompt per session. The engine caches the state of the
+  // longest prefix it has seen, and on a hybrid model that cache is wiped the
+  // moment a prompt with a different system section arrives. So the tool list
+  // never changes shape per request: every group is visible (plus vision when
+  // a photo is attached, minus the tools the user switched off, which are
+  // constant for the session). What changes per request is what may RUN:
+  //  - the router's categories become an execution allowlist;
+  //  - the deterministic guards become per-tool refusals with a reason the
+  //    model can act on ("use schedule_task instead");
+  //  - "no tools" (router said none, or the user switched them off) is an
+  //    empty allowlist plus a plain-conversation instruction.
+  // Hiding still happens for `narrowExposure`, the legacy small-window mode.
+  let toolGroups: string[];
+  if (opts.narrowExposure) {
+    toolGroups = [...routeToolGroups(prompt, macroNames), ...(opts.extraToolGroups ?? []), ...(opts.hasAttachment ? ['vision'] : [])];
+  } else {
+    toolGroups = [...ALL_TOOL_GROUPS, ...(opts.extraToolGroups ?? []), ...(opts.hasAttachment ? ['vision'] : [])];
+  }
+
+  const denyTools: Record<string, string> = {};
+  for (const t of deferredToolExclusions(prompt)) {
+    denyTools[t] = `${t} only rings a bell and cannot check or decide anything later. Hand the later part to schedule_task with when="+N".`;
+  }
+  for (const t of calendarToolExclusions(prompt)) {
+    denyTools[t] = 'Putting something ON THE CALENDAR is calendar_create, never schedule_task.';
+  }
+  for (const t of teachingToolExclusions(prompt)) {
+    denyTools[t] = 'The user is teaching a phrase. Record it with define_macro; do not run or remember anything now.';
+  }
+  for (const t of macroHit?.exclude ?? []) {
+    denyTools[t] = `The user said a phrase they already taught. Call run_macro with that name instead of ${t}.`;
+  }
+  if (said && QUESTION_RE.test(prompt)) {
+    // Device evidence: "what did I ask you to do when I say wind down?" RAN
+    // the phrase. A question about a phrase describes it; it never runs it.
+    denyTools['run_macro'] = `The user is asking ABOUT "${said}", not saying it. Describe its steps instead of running it.`;
+  }
+  if (!teachingNow && !denyTools['define_macro']) {
+    // Device evidence: asked what a taught phrase does, the model REDEFINED
+    // it with invented steps. Defining is only ever right while teaching.
+    denyTools['define_macro'] = 'The user is not teaching a phrase right now. Answer from what you know; do not define or change any phrase.';
+  }
+
+  let allowExecuteOnly: string[] | undefined;
+  let allowExecuteReason: string | undefined;
+  if (opts.noTools) {
+    allowExecuteOnly = [];
+    allowExecuteReason = 'Tools are switched off for this message. Answer in plain conversation.';
+    lines.push('Tools are switched off for this message: reply in plain conversation, do not call anything.');
+  } else if (teachingNow) {
+    allowExecuteOnly = ['define_macro'];
+    allowExecuteReason = 'Record it as a step inside define_macro instead of running it now.';
+  } else if (opts.categories) {
+    if (opts.categories.length === 1 && opts.categories[0] === 'none') {
+      allowExecuteOnly = [];
+      allowExecuteReason = 'This message needs no tools. Answer in plain conversation.';
+      lines.push(
+        'This message needs no tools. Reply in plain conversation; do not call anything. If it turns out to need live or personal data you do not have (weather, news, prices, the user\'s own records), say you would need to look it up rather than guessing.',
+      );
+    } else {
+      const groups = new Set(categoriesToGroups(opts.categories));
+      if (DEFERRED_RE.test(prompt)) for (const g of ['schedule', 'device', 'memory']) groups.add(g);
+      if (CALENDAR_PLACE_RE.test(prompt)) groups.add('schedule');
+      if (said) groups.add('macro');
+      if (opts.hasAttachment) groups.add('vision');
+      for (const g of opts.extraToolGroups ?? []) groups.add(g);
+      const allowed = (opts.toolsByGroup ? [...groups].flatMap((g) => opts.toolsByGroup![g] ?? []) : []);
+      if (allowed.length > 0) {
+        allowExecuteOnly = allowed;
+        allowExecuteReason = `That tool is not relevant to this message. Relevant tools: ${allowed.join(', ')}. Use one of those, or answer directly.`;
+      }
+      lines.push(`This message is about: ${opts.categories.join(', ')}. Use only tools that serve that, or answer directly.`);
+    }
+  }
 
   return {
-    toolGroups: teachingNow
-      ? // A macro step can name any tool the user has actually connected, so
-        // their own groups (MCP servers, custom HTTP tools) belong here too —
-        // without them the model cannot write an MCP step into a taught
-        // phrase, because it never sees the tool's name. This is the same
-        // exposure a normal turn gets, so it adds no budget risk that the
-        // rest of the app does not already carry.
-        ['core', 'device', 'schedule', ...(opts.extraToolGroups ?? [])]
-      : [
-          ...(opts.narrowExposure ? routeToolGroups(prompt, macroNames) : ALL_TOOL_GROUPS),
-          ...(opts.extraToolGroups ?? []),
-          ...(opts.hasAttachment ? ['vision'] : []),
-        ],
-    ...(teachingNow ? { allowExecuteOnly: ['define_macro'] } : {}),
-    excludeTools: [
-      ...deferredToolExclusions(prompt),
-      ...calendarToolExclusions(prompt),
-      ...teachingToolExclusions(prompt),
-      ...(macroHit?.exclude ?? []),
-      ...(opts.extraExcludeTools ?? []),
-    ],
+    deliberate,
+    toolGroups,
+    ...(allowExecuteOnly ? { allowExecuteOnly } : {}),
+    ...(allowExecuteReason ? { allowExecuteReason } : {}),
+    denyTools,
+    // Hidden for the whole session: what the user switched off in Tools.
+    excludeTools: [...(opts.extraExcludeTools ?? [])],
     preamble: lines.join('\n'),
   };
 }
 
 export function teachingToolExclusions(prompt: string): string[] {
+  if (!isTeaching(prompt)) return [];
   // `remember` is the other trap: teaching a phrase looks enough like storing
   // a fact that the model writes the rule to memory and reports success
   // without ever defining the macro (device evidence: remember(fact='When

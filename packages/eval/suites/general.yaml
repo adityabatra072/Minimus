@@ -144,3 +144,45 @@ scenarios:
     expect:
       no_calls: true
       max_turns: 3
+
+  # --- conversation after teaching: the phrase list must not bait the model ---
+  - id: hello-with-macro
+    prompt: hello
+    route: true
+    macros: ["wind down", "focus mode"]
+    expect:
+      no_calls: true
+      max_turns: 2
+
+  - id: thanks-with-macro
+    prompt: thanks, that was helpful
+    route: true
+    macros: ["wind down"]
+    expect:
+      no_calls: true
+      max_turns: 2
+
+  - id: joke
+    prompt: tell me a joke
+    route: true
+    macros: ["wind down"]
+    expect:
+      no_calls: true
+      max_turns: 2
+
+  - id: what-can-you-do
+    prompt: what can you do?
+    route: true
+    expect:
+      no_calls: true
+      max_turns: 2
+
+  - id: run-macro-exact
+    prompt: focus mode
+    route: true
+    macros: ["wind down", "focus mode"]
+    expect:
+      calls:
+        - tool: run_macro
+          args: { name: "focus mode" }
+      max_turns: 2

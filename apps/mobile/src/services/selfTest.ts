@@ -88,7 +88,7 @@ function checkRouting(): string {
     ['how much space have I got left on this phone?', ['device']],
     ['who won the Monaco Grand Prix this year?', ['web']],
     ['let Sam know I am running late', ['comms']],
-    ['what did I tell you about Thursday?', ['core']],
+    ['what did I tell you about Thursday?', ['memory']],
   ];
   for (const [prompt, must] of cases) {
     const { toolGroups } = composeRun(prompt);
@@ -101,14 +101,16 @@ function checkRouting(): string {
   // Calendar placement must not see schedule_task: device evidence
   // (calendar-judgment, 1458s, failed) is calendar_query, schedule_task,
   // calendar_query, schedule_task, schedule_task and never calendar_create.
+  // The tool list is constant for the session (the engine caches it); the
+  // guards work by refusing execution with a reason instead of hiding.
   {
     const place = composeRun('find me 90 minutes for the gym tomorrow and put it in.');
-    if (!place.excludeTools.includes('schedule_task')) {
-      throw new Error('calendar placement still exposes schedule_task');
+    if (!place.denyTools['schedule_task']) {
+      throw new Error('calendar placement does not refuse schedule_task');
     }
     const defer = composeRun('Check my battery, then in 3 minutes check it again and tell me.');
-    if (defer.excludeTools.includes('schedule_task')) {
-      throw new Error('deferred request lost schedule_task, which is the tool it needs');
+    if (defer.denyTools['schedule_task'] || !defer.denyTools['set_timer']) {
+      throw new Error('deferred request must refuse set_timer and keep schedule_task');
     }
   }
   // Teaching is the inverse case: the sentence is full of imperatives, and
@@ -121,24 +123,24 @@ function checkRouting(): string {
       .list(teach.toolGroups)
       .map((t) => t.name)
       .filter((n) => !teach.excludeTools.includes(n));
-    if (!visible.includes('define_macro')) {
-      throw new Error('teaching cannot reach define_macro');
-    }
     // set_brightness and flashlight must STAY visible: they are the vocabulary
-    // the macro steps are written in, and hiding them made the model emit
-    // prose steps that define_macro's schema rejects. What must not be here is
-    // anything a macro step cannot contain, plus run_macro (replaying while
-    // being taught is never right).
-    for (const needed of ['set_brightness', 'flashlight']) {
-      if (!visible.includes(needed)) {
-        throw new Error(`teaching lost ${needed}, the steps have no vocabulary`);
-      }
+    // the macro steps are written in. Only define_macro may RUN.
+    for (const needed of ['set_brightness', 'flashlight', 'define_macro']) {
+      if (!visible.includes(needed)) throw new Error(`teaching lost ${needed}`);
     }
-    for (const forbidden of ['run_macro', 'web_search', 'send_email', 'play_music']) {
-      if (visible.includes(forbidden)) {
-        throw new Error(`teaching still exposes ${forbidden} (visible: ${visible.join(',')})`);
-      }
+    if (JSON.stringify(teach.allowExecuteOnly) !== JSON.stringify(['define_macro'])) {
+      throw new Error(`teaching lets more than define_macro run: ${JSON.stringify(teach.allowExecuteOnly)}`);
     }
+    if (!teach.denyTools['run_macro'] || !teach.denyTools['remember']) {
+      throw new Error('teaching does not refuse run_macro and remember');
+    }
+  }
+  // A greeting after teaching must not see the taught-phrase bait, and a
+  // router "none" must leave nothing runnable.
+  {
+    const hello = composeRun('hello', { macroNames: ['wind down'], categories: ['none'], toolsByGroup: getToolRegistry().byGroup() });
+    if (hello.preamble.includes('wind down')) throw new Error('taught phrase listed for an unrelated message');
+    if (!hello.allowExecuteOnly || hello.allowExecuteOnly.length !== 0) throw new Error('"none" still lets tools run');
   }
   if (!teachingPreamble('New rule: when I say wind down, dim the screen')) {
     throw new Error('teaching intent not detected');
@@ -147,9 +149,9 @@ function checkRouting(): string {
     throw new Error('teaching intent false positive');
   }
   if (!deferredToolExclusions('check again in 3 minutes').includes('set_timer')) {
-    throw new Error('deferred intent does not hide set_timer');
+    throw new Error('deferred intent does not refuse set_timer');
   }
-  return `${cases.length} routing cases + intent guards`;
+  return `${cases.length} routing cases + guards + router gate`;
 }
 
 function checkParsing(): string {

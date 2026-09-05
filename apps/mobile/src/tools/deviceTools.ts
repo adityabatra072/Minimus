@@ -11,6 +11,8 @@ import type { ToolDefinition } from '@minimus/agent-core';
 interface MinimusToolsModule {
   setTorch(on: boolean): Promise<void>;
   setBrightness(level: number): Promise<void>;
+  clipboardRead?(): Promise<string>;
+  clipboardWrite?(text: string): Promise<void>;
 }
 
 function nativeTools(): MinimusToolsModule | null {
@@ -35,6 +37,7 @@ export function deviceTools(): ToolDefinition[] {
   return [
     {
       name: 'flashlight',
+      kind: 'action',
       group: 'device',
       description: 'Turn the phone flashlight (torch) on or off',
       parameters: {
@@ -51,6 +54,7 @@ export function deviceTools(): ToolDefinition[] {
     },
     {
       name: 'set_brightness',
+      kind: 'action',
       group: 'device',
       description: 'Set screen brightness',
       parameters: {
@@ -87,6 +91,7 @@ export function deviceTools(): ToolDefinition[] {
     },
     {
       name: 'open_app',
+      kind: 'action',
       group: 'device',
       description: 'Open another app on the phone by name',
       parameters: {
@@ -108,6 +113,56 @@ export function deviceTools(): ToolDefinition[] {
         }
         await Linking.openURL(url);
         return { ok: true, opened: name };
+      },
+    },
+    {
+      name: 'open_url',
+      group: 'device',
+      kind: 'action',
+      description: 'Open a web address in the browser, or a maps search like "maps:coffee near me"',
+      parameters: {
+        type: 'object',
+        properties: { url: { type: 'string', description: 'https://… link, or "maps:<place or query>" to open Maps' } },
+        required: ['url'],
+      },
+      execute: async (args) => {
+        let url = String(args['url']).trim();
+        if (/^maps:/i.test(url)) {
+          url = `maps://?q=${encodeURIComponent(url.replace(/^maps:/i, '').trim())}`;
+        } else if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+          url = `https://${url}`;
+        }
+        await Linking.openURL(url);
+        return { ok: true, opened: url };
+      },
+    },
+    {
+      name: 'clipboard_read',
+      group: 'device',
+      description: 'Read the text currently on the clipboard',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const native = nativeTools();
+        if (!native?.clipboardRead) throw new Error('clipboard not available');
+        const text = await native.clipboardRead();
+        return { text: text.slice(0, 4000), empty: text.trim() === '' };
+      },
+    },
+    {
+      name: 'clipboard_write',
+      group: 'device',
+      kind: 'action',
+      description: 'Put text on the clipboard',
+      parameters: {
+        type: 'object',
+        properties: { text: { type: 'string' } },
+        required: ['text'],
+      },
+      execute: async (args) => {
+        const native = nativeTools();
+        if (!native?.clipboardWrite) throw new Error('clipboard not available');
+        await native.clipboardWrite(String(args['text']));
+        return { ok: true, chars: String(args['text']).length };
       },
     },
   ];
