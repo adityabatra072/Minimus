@@ -78,6 +78,24 @@ UI and are different underneath:
   because something changed the system prompt between passes.
 - `cached 1400+` but 5 tok/s: the phone is hot. Check `health:`.
 
+## Clock, voice and history scenarios (v2.1)
+
+```
+scripts/qa/seq.sh "wake me at 6:45" "timer for 3 minutes" "set an alarm for 7 every day" "what's my day look like"
+node scripts/qa/qa.mjs navigate clock       # Clock screen: alarms/timers/stopwatch
+node scripts/qa/qa.mjs deep                 # includes "Voice stack (recognizer + voices)"
+```
+
+Expect: the first three are reflexes (0.2 s, receipt says "reflex"); the
+fourth calls `daily_brief` and answers in a few sentences. On iOS 26 the
+lock screen shows the AlarmKit countdown; on 17.5–18 a notification fires.
+
+Voice cannot be driven from the laptop. Manual: tap the mic, say "turn on
+the flashlight" quickly and mumbled; the composer should show live words
+and the diag log a `voice corrected:` line when the model repaired it.
+Say "Talk to Minimus" to Siri once the app has been launched at least once
+(App Shortcuts register on first launch).
+
 ## Manual passes nothing can automate
 
 - **Wake word**: hands-free on, say "Minimus, what's my battery?" out loud.

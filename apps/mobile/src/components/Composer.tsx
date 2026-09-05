@@ -41,7 +41,7 @@ export function Composer({
   const placeholder = running
     ? 'Working…'
     : voiceState === 'listening'
-      ? 'Listening — tap the mic when you are done'
+      ? voiceDetail || 'Listening — tap the mic when you are done'
       : voiceState === 'transcribing'
         ? 'Heard you — writing it down…'
         : voiceState === 'speaking'

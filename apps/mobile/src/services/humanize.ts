@@ -48,7 +48,9 @@ export function verbFor(call: ToolCall): string {
     case 'create_reminder':
       return `Adding reminder “${str(a['title'], '…')}”`;
     case 'set_alarm':
-      return `Setting alarm for ${str(a['time'], '…')}`;
+      return `Setting alarm for ${str(a['time'], '…')}${a['repeat'] === 'daily' ? ' every day' : ''}`;
+    case 'daily_brief':
+      return 'Gathering your day';
     case 'set_timer': {
       const m = Number(a['minutes']);
       return `Starting a ${Number.isFinite(m) ? m : '…'} min timer`;
@@ -114,9 +116,14 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
       return `${events} event${events === 1 ? '' : 's'}, ${gaps} free gap${gaps === 1 ? '' : 's'}`;
     }
     case 'set_alarm':
-      return 'Alarm set';
+      return r['alarm_set_for'] ? `Alarm set for ${str(r['alarm_set_for'])}${r['repeats'] === 'daily' ? ', daily' : ''}` : 'Alarm set';
     case 'set_timer':
-      return 'Timer running';
+      return r['ends_in'] ? `Timer running · ${str(r['ends_in'])}` : 'Timer running';
+    case 'daily_brief': {
+      const ev = Array.isArray(r['calendar_today']) ? r['calendar_today'].length : 0;
+      const rem = Array.isArray(r['reminders_due']) ? r['reminders_due'].length : 0;
+      return `${ev} event${ev === 1 ? '' : 's'}, ${rem} reminder${rem === 1 ? '' : 's'}`;
+    }
     case 'schedule_task':
       return 'Scheduled';
     case 'send_notification':

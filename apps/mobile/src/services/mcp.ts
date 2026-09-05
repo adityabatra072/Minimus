@@ -113,7 +113,7 @@ export class McpClient {
     await this.rpc('initialize', {
       protocolVersion: '2025-03-26',
       capabilities: {},
-      clientInfo: { name: 'runanywhere-agent', version: '1.0' },
+      clientInfo: { name: 'minimus', version: '1.0' },
     });
     await this.notify('notifications/initialized');
     const result = (await this.rpc('tools/list', {})) as { tools?: McpTool[] };

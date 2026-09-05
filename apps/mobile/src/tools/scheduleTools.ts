@@ -2,6 +2,7 @@ import { NativeModules, Platform } from 'react-native';
 import type { ToolDefinition } from '@minimus/agent-core';
 import { parseWhen, scheduler } from '../services/scheduler';
 import { diag } from '../services/diag';
+import { formatClock, formatDuration, nextAlarmFire, timerRemainingSeconds, useClockStore } from '../services/clock';
 
 /**
  * Scheduling tools backed by the MinimusTools native module (Android for now;
@@ -81,20 +82,24 @@ export function scheduleTools(): ToolDefinition[] {
       kind: 'action',
       group: 'schedule',
       description:
-        'Set an alarm clock that rings at a time of day. It only rings — it cannot check or do anything.',
+        'Set an alarm clock that rings at a time of day (a real alarm, like the Clock app). It only rings — it cannot check or do anything.',
       parameters: {
         type: 'object',
         properties: {
           time: { type: 'string', description: '24h HH:MM, e.g. 07:30' },
           label: { type: 'string' },
+          repeat: { type: 'string', enum: ['once', 'daily'], description: 'daily when the user says every day / weekdays / each morning' },
         },
         required: ['time'],
       },
       execute: async (args) => {
         const m = /^(\d{1,2}):(\d{2})$/.exec(String(args['time']).trim());
         if (!m) throw new Error('time must be 24h HH:MM, e.g. 07:30');
-        await native().setAlarm(Number(m[1]), Number(m[2]), args['label'] ? String(args['label']) : null);
-        return { ok: true, alarm_set_for: args['time'] };
+        const hour = Number(m[1]);
+        const minute = Number(m[2]);
+        if (hour > 23 || minute > 59) throw new Error('time must be 24h HH:MM, e.g. 07:30');
+        const alarm = await useClockStore.getState().addAlarm(hour, minute, args['label'] ? String(args['label']) : '', args['repeat'] === 'daily');
+        return { ok: true, alarm_set_for: formatClock(hour, minute), repeats: alarm.repeatsDaily ? 'daily' : 'once', rings_in_minutes: Math.round((nextAlarmFire(alarm) - Date.now()) / 60_000) };
       },
     },
     {
@@ -114,8 +119,8 @@ export function scheduleTools(): ToolDefinition[] {
       execute: async (args) => {
         const minutes = Number(args['minutes']);
         if (!Number.isFinite(minutes) || minutes <= 0) throw new Error('minutes must be a positive number');
-        await native().setTimer(Math.round(minutes * 60), args['label'] ? String(args['label']) : null);
-        return { ok: true, timer_minutes: minutes };
+        const timer = await useClockStore.getState().startTimer(Math.round(minutes * 60), args['label'] ? String(args['label']) : '');
+        return { ok: true, timer_minutes: minutes, ends_in: formatDuration(timerRemainingSeconds(timer)) };
       },
     },
     {
@@ -156,6 +161,7 @@ export function scheduleTools(): ToolDefinition[] {
             description:
               'minutes from now as "+N" (use this: "+3" means three minutes from now). "07:30" or an ISO datetime also work but must be in the future',
           },
+          repeat: { type: 'string', enum: ['once', 'daily'], description: 'daily when the user wants this every day at that time' },
         },
         required: ['instruction', 'when'],
       },
@@ -174,7 +180,7 @@ export function scheduleTools(): ToolDefinition[] {
             'that time has already passed — send a relative offset instead, like "+3" for three minutes from now',
           );
         }
-        const task = await scheduler.schedule(instruction, dueAtMs);
+        const task = await scheduler.schedule(instruction, dueAtMs, args['repeat'] === 'daily' ? { repeat: 'daily' } : {});
         // iOS suspends the app, so a task due while it is closed cannot run
         // by itself. A notification at the due time brings the user back;
         // the launch runs anything overdue.
@@ -186,6 +192,41 @@ export function scheduleTools(): ToolDefinition[] {
           task_id: task.id,
           runs_at: hhmm(dueAtMs),
           in_minutes: Math.max(0, Math.round((dueAtMs - Date.now()) / 60_000)),
+          ...(task.repeat ? { repeats: 'daily' } : {}),
+        };
+      },
+    },
+    {
+      name: 'daily_brief',
+      kind: 'query',
+      group: 'schedule',
+      description:
+        "Everything about the user's day in one call: today's calendar, reminders due soon, alarms, and tasks you have scheduled. Use for \"what's my day\", \"morning brief\", \"what's on today\", \"anything I'm forgetting\".",
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const mod = native();
+        const kit = (NativeModules as Record<string, { remindersList?: (h: number) => Promise<{ title: string; dueAtMs?: number; list?: string }[]> } | undefined>)['MinimusAlarms'];
+        const now = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        const [events, reminders, pending] = await Promise.all([
+          mod.calendarQuery(start.getTime(), end.getTime()).catch(() => [] as CalendarEventNative[]),
+          kit?.remindersList ? kit.remindersList(36).catch(() => []) : Promise.resolve([]),
+          scheduler.listPending().catch(() => []),
+        ]);
+        const clock = useClockStore.getState();
+        return {
+          now: now.toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' }),
+          calendar_today: events
+            .filter((e) => e.endMillis > now.getTime())
+            .slice(0, 8)
+            .map((e) => ({ title: e.title, at: hhmm(e.startMillis), ends: hhmm(e.endMillis) })),
+          reminders_due: reminders.slice(0, 8).map((r) => ({ title: r.title, ...(r.dueAtMs ? { due: new Date(r.dueAtMs).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) } : {}) })),
+          alarms: clock.alarms.filter((a) => a.enabled).map((a) => `${formatClock(a.hour, a.minute)}${a.label ? ` ${a.label}` : ''}`),
+          timers: clock.timers.filter((t) => t.state !== 'done').map((t) => `${t.label || 'timer'} ${formatDuration(timerRemainingSeconds(t))} left`),
+          scheduled_tasks: pending.slice(0, 6).map((t) => ({ instruction: t.instruction.slice(0, 80), at: hhmm(t.dueAtMs) })),
         };
       },
     },

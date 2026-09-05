@@ -3,6 +3,8 @@ import { Animated, Easing, StatusBar, StyleSheet, Text, View, useColorScheme, us
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import ChatScreen, { type Destination } from './src/screens/ChatScreen';
+import ClockScreen from './src/screens/ClockScreen';
+import { useClockStore } from './src/services/clock';
 import BrainScreen from './src/screens/BrainScreen';
 import DiagnosticsScreen from './src/screens/DiagnosticsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
@@ -45,6 +47,7 @@ export default function App(): React.JSX.Element {
         useSettingsStore.getState().hydrate(),
         useSessionStore.getState().hydrate(),
         useToolStore.getState().hydrate(),
+        useClockStore.getState().hydrate(),
       ]);
       await adoptLegacyModels().catch(() => []);
       // Custom tools register instantly; MCP servers connect in the
@@ -79,6 +82,9 @@ export default function App(): React.JSX.Element {
           settings: 'settings',
           diagnostics: 'diagnostics',
           rehearsal: 'diagnostics',
+          clock: 'clock',
+          alarms: 'clock',
+          timers: 'clock',
         };
         if (!(target in map)) throw new Error(`unknown screen ${target}`);
         setScreen(map[target] ?? null);
@@ -149,6 +155,8 @@ export default function App(): React.JSX.Element {
                 <SettingsScreen onClose={close} onOpenBrain={() => setScreen('brain')} />
               ) : screen === 'tools' ? (
                 <ToolsScreen onClose={close} />
+              ) : screen === 'clock' ? (
+                <ClockScreen onClose={close} />
               ) : screen === 'memory' ? (
                 <MemoryScreen onClose={close} />
               ) : screen === 'history' ? (

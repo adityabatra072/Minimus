@@ -5,8 +5,8 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-# RunAnywhere SDK floor is iOS 17.5 (Package.swift/podspecs); RN's default
-# min_ios_version_supported is lower and makes pod resolution fail.
+# iOS 17.5 floor: llama.rn's Metal path and the app's Swift modules target it;
+# AlarmKit (iOS 26) is weak-linked and checked at run time.
 platform :ios, '17.5'
 prepare_react_native_project!
 
@@ -42,18 +42,9 @@ target 'mobile' do
         if bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 17.5
           bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.5'
         end
-        # The @runanywhere pods declare swift_version 6.2 but their sources
-        # trip Xcode 26's Swift-6 strict concurrency (Sendable violations in
-        # HybridAudioCapture/Playback). Compile them in Swift 5 language mode
-        # with minimal concurrency checking until fixed upstream.
-        if t.name.start_with?('RunAnywhere')
-          bc.build_settings['SWIFT_VERSION'] = '5.0'
-          bc.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
-        end
         # Xcode 26 sandboxes user script phases by default, which blocks
-        # CocoaPods' copy-xcframeworks phase — the vendored librac_commons.a
-        # device slice never reaches XCFrameworkIntermediates and the link
-        # fails. Same setting RN templates ship with.
+        # CocoaPods' copy-xcframeworks phase (llama.rn ships a prebuilt
+        # xcframework). Same setting RN templates ship with.
         bc.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
       end
     end

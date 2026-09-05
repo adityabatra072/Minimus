@@ -51,6 +51,27 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
     },
   },
   {
+    // "wake me at 6:45", "set an alarm for 7", "alarm at 7:30 pm every day"
+    re: /^(?:(?:set|put|start) (?:an? |the )?alarm (?:clock )?(?:for |at )?|wake me (?:up )?(?:at )?|alarm (?:for |at )?)(\d{1,2})(?::(\d{2}))? ?(am|pm|a\.m\.|p\.m\.)?(?: (every ?day|daily|each morning|every morning))?$/,
+    make: (m) => {
+      let hour = Number(m[1]);
+      const minute = m[2] ? Number(m[2]) : 0;
+      const mer = m[3]?.replace(/\./g, '').toLowerCase();
+      if (!Number.isFinite(hour) || hour > 23 || minute > 59) return null;
+      if (mer === 'pm' && hour < 12) hour += 12;
+      if (mer === 'am' && hour === 12) hour = 0;
+      const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      const daily = Boolean(m[4]);
+      const shown = new Date();
+      shown.setHours(hour, minute, 0, 0);
+      const label = shown.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return {
+        call: { id: id(), name: 'set_alarm', arguments: daily ? { time, repeat: 'daily' } : { time } },
+        confirm: `Alarm set for ${label}${daily ? ', every day' : ''}.`,
+      };
+    },
+  },
+  {
     re: /^(?:set|put|turn|change) (?:the )?(?:screen )?brightness (?:to |at )?(\d{1,3}) ?(?:%|percent)$/,
     make: (m) => {
       const pct = Math.max(0, Math.min(100, Number(m[1])));

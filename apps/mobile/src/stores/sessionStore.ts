@@ -85,13 +85,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         /* corrupt index — start fresh, transcripts stay recoverable by key */
       }
     }
-    // Reopen the conversation the user was last in. Without this every launch
-    // landed on an empty chat and the previous one could only be found through
-    // the history screen, which reads as "the app forgot".
-    const active = await AsyncStorage.getItem(ACTIVE_KEY).catch(() => null);
-    if (active && get().sessions.some((s) => s.id === active)) {
-      set({ activeSessionId: active });
-    }
+    // Every launch starts a fresh chat. The previous conversation is one tap
+    // away in Chats, and reopening it puts its history back in front of the
+    // model (ChatScreen builds the prior turns from the transcript).
+    AsyncStorage.setItem(ACTIVE_KEY, get().activeSessionId).catch(() => undefined);
   },
 
   newSession: () => {

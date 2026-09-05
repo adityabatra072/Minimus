@@ -36,6 +36,7 @@ import { scheduler } from '../services/scheduler';
 import { runAgentHeadless } from '../services/headlessAgent';
 import { diag } from '../services/diag';
 import { loadMacros } from '../tools/macroTools';
+import { clockHeadline, useClockStore } from '../services/clock';
 import { matchingFacts } from '../tools/memoryTools';
 import { composeRun } from '../services/intent';
 import { acquireRun, isRunBusy, releaseRun } from '../services/runLock';
@@ -60,7 +61,7 @@ import { elevation, font, radius, space, usePalette } from '../theme';
  * runs is a line on a receipt. Raw tool syntax never renders.
  */
 
-export type Destination = 'history' | 'brain' | 'tools' | 'memory' | 'settings' | 'diagnostics';
+export type Destination = 'history' | 'brain' | 'tools' | 'memory' | 'settings' | 'diagnostics' | 'clock';
 
 type Item =
   | { kind: 'user'; id: string; text: string }
@@ -153,6 +154,8 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
   const toolsEnabledRef = useRef(toolsEnabled);
   toolsEnabledRef.current = toolsEnabled;
   const voiceRef = useRef<VoicePipeline | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   useEffect(() => {
     void allModels().then(setModels);
@@ -326,6 +329,19 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
         finish();
         return '';
       }
+      // What came before in this chat, newest last, capped so a long
+      // conversation cannot crowd out the tools. A reopened chat gets its
+      // history back in front of the model this way.
+      const history: { role: 'user' | 'assistant'; content: string }[] = [];
+      let budget = 2400;
+      for (let i = itemsRef.current.length - 2; i >= 0 && budget > 0; i--) {
+        const it = itemsRef.current[i]!;
+        if (it.kind !== 'user' && it.kind !== 'agent' && it.kind !== 'scheduled') continue;
+        const content = it.text.slice(0, 600);
+        budget -= content.length;
+        if (budget < 0) break;
+        history.unshift({ role: it.kind === 'agent' ? 'assistant' : 'user', content });
+      }
       const composition = composeRun(prompt, { ...baseOptions, ...(categories ? { categories } : {}), noTools, toolsByGroup: registry.byGroup() });
       const { toolGroups, excludeTools, allowExecuteOnly, allowExecuteReason, denyTools, preamble, deliberate } = composition;
       const loop = new AgentLoop();
@@ -396,6 +412,7 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
           denyTools,
           preamble,
           deliberate,
+          history,
           policy: useRemote ? policyFor(adapter.modelId) : { ...policyFor(adapter.modelId), contextWindowTokens: engine.getInfo()?.contextTokens ?? 8192 },
           approvals: requireApprovals ? (req) => askApproval(req.call) : async () => true,
           signal: abort.signal,
@@ -418,7 +435,7 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
             break;
           case 'text_delta':
             rawTurn += ev.text;
-            if (!liveTimer) liveTimer = setTimeout(paintLive, 120);
+            if (!liveTimer) liveTimer = setTimeout(paintLive, 200);
             break;
           case 'generation_stats':
             if (ev.usage.decodeTokensPerSec) lastTps = ev.usage.decodeTokensPerSec;
@@ -541,8 +558,10 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
         onState: (state, detail) => {
           setVoiceState(state);
           setCoreState(state === 'listening' ? 'listening' : state === 'speaking' ? 'speaking' : 'idle');
+          if (state !== 'listening') setVoiceDetail('');
           if (detail) diag(`voice: ${state} (${detail})`);
         },
+        onPartial: (text) => setVoiceDetail(text),
         onUtterance: (text) => {
           void (async () => {
             const finalText = await runRef.current(text, 'user');
@@ -560,6 +579,21 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
     return voiceRef.current;
   }, []);
 
+  const armVoice = useCallback(
+    async (mode: 'pushToTalk' | 'handsFree') => {
+      const pipeline = getVoice();
+      setVoiceState('preparing');
+      await ensureVoiceReady((label) => setVoiceDetail(label));
+      const macros = await loadMacros().catch(() => []);
+      pipeline.setMacroNames(macros.map((m) => m.name));
+      // The first utterance never needs the wake phrase: the user just tapped
+      // or asked for us. Hands-free re-arms after the answer gate on it.
+      pipeline.setRequireWake(false);
+      await pipeline.start({ pushToTalk: mode === 'pushToTalk' });
+    },
+    [getVoice],
+  );
+
   const onMic = useCallback(async () => {
     const pipeline = getVoice();
     if (voiceState === 'speaking') {
@@ -573,17 +607,16 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
       if (finalText) await pipeline.speak(finalText);
       return;
     }
-    if (voiceState === 'transcribing') return;
+    if (voiceState === 'transcribing' || voiceState === 'preparing') return;
     try {
-      setVoiceState('preparing');
-      await ensureVoiceReady((label) => setVoiceDetail(label));
-      pipeline.setRequireWake(false);
-      await pipeline.start({ pushToTalk: true });
+      await armVoice('pushToTalk');
     } catch (err) {
       setVoiceState('idle');
       setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'danger', text: `Voice setup failed: ${err instanceof Error ? err.message : String(err)}` }]);
     }
-  }, [voiceState, getVoice]);
+  }, [voiceState, getVoice, armVoice]);
+  const armVoiceRef = useRef(armVoice);
+  armVoiceRef.current = armVoice;
 
   useEffect(
     () => () => {
@@ -608,7 +641,9 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
   // Deep links: minimus://ask?q=<text> runs the request (Shortcuts, the
-  // Action button, Back Tap, another app). minimus://open just opens.
+  // Action button, Back Tap, another app); minimus://ask?listen=1 opens the
+  // mic straight away and speaks the answer, which is the "talk to Minimus"
+  // Siri/Shortcut path. minimus://open just opens.
   useEffect(() => {
     let handledInitial = false;
     const handle = (url: string | null) => {
@@ -617,6 +652,15 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
       if (!m) return;
       const params = new URLSearchParams(m[1]);
       const q = (params.get('q') ?? params.get('prompt') ?? '').trim();
+      if (!q && params.get('listen')) {
+        diag('deep link listen');
+        // Speak the reply and hear one utterance without a wake phrase.
+        void armVoiceRef.current('handsFree').catch((err) => {
+          setVoiceState('idle');
+          diag(`deep link listen failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return;
+      }
       if (!q) return;
       diag(`deep link ask: ${JSON.stringify(q.slice(0, 80))}`);
       if (isRunBusy()) setInput(q);
@@ -633,8 +677,6 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
   }, []);
 
   // QA bridge handlers.
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
   useEffect(() => {
     const offAsk = registerQaHandler('ask', async (args) => {
       const prompt = String(args['prompt'] ?? '');
@@ -680,6 +722,33 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
     };
   }, []);
 
+  // Clock pill: the soonest timer counts down in the header; otherwise the
+  // next alarm. A finished timer also drops a line into the chat, so the
+  // person looking at the phone sees it even with notifications off.
+  const clockAlarms = useClockStore((s) => s.alarms);
+  const clockTimers = useClockStore((s) => s.timers);
+  const [clockNow, setClockNow] = useState(Date.now());
+  const timersRunning = clockTimers.some((t) => t.state === 'running');
+  useEffect(() => {
+    if (!timersRunning) return;
+    const t = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [timersRunning]);
+  useEffect(() => {
+    const t = setInterval(() => void useClockStore.getState().sync(), 5000);
+    return () => clearInterval(t);
+  }, []);
+  const announcedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const t of clockTimers) {
+      if (t.state === 'done' && !announcedRef.current.has(t.id)) {
+        announcedRef.current.add(t.id);
+        setItems((prev) => [...prev, { kind: 'notice', id: nextId(), tone: 'muted', text: `⏱ ${t.label || 'Timer'} is done.` }]);
+      }
+    }
+  }, [clockTimers]);
+  const clockPill = useMemo(() => clockHeadline({ alarms: clockAlarms, timers: clockTimers }, clockNow), [clockAlarms, clockTimers, clockNow]);
+
   const engineLabel =
     remote.enabled && remote.baseUrl.trim() && remote.model.trim()
       ? `cloud · ${remote.model.trim()}`
@@ -697,6 +766,7 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
         { label: 'New chat', hint: 'Start fresh', action: () => (running ? undefined : useSessionStore.getState().newSession()) },
         { label: 'Chats', hint: 'Earlier conversations', action: () => onOpen('history') },
         { label: 'Memory', hint: 'What it knows, taught phrases, scheduled', action: () => onOpen('memory') },
+        { label: 'Clock', hint: 'Alarms, timers, stopwatch', action: () => onOpen('clock') },
         { label: 'Brain', hint: engineLabel, action: () => onOpen('brain') },
         { label: 'Tools', hint: 'What it may touch', action: () => onOpen('tools') },
         { label: 'Settings', hint: 'Voice, approvals, cloud', action: () => onOpen('settings') },
@@ -718,6 +788,11 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
           </View>
         </Pressable>
         <View style={styles.headerRight}>
+          {clockPill ? (
+            <Pressable onPress={() => onOpen('clock')} hitSlop={8} style={[styles.clockPill, { backgroundColor: clockPill.kind === 'timer' ? p.liveSoft : p.surface, borderColor: clockPill.kind === 'timer' ? p.live : p.line }]} accessibilityRole="button" accessibilityLabel="Clock">
+              <Text style={[styles.clockPillText, { color: clockPill.kind === 'timer' ? p.live : p.ink2 }]}>{clockPill.kind === 'alarm' ? '⏰ ' : ''}{clockPill.text}</Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => onOpen('history')} hitSlop={8} style={[styles.headerBtn, { backgroundColor: p.surface, borderColor: p.line }]} accessibilityRole="button" accessibilityLabel="Chats">
             <GlyphClock color={p.ink2} size={15} />
           </Pressable>
@@ -826,7 +901,7 @@ function EmptyState({ onPick }: { onPick: (s: string) => void }): React.JSX.Elem
   );
 }
 
-function ItemView({ item }: { item: Item }): React.JSX.Element | null {
+const ItemView = React.memo(function ItemView({ item }: { item: Item }): React.JSX.Element | null {
   const p = usePalette();
   switch (item.kind) {
     case 'user':
@@ -877,7 +952,7 @@ function ItemView({ item }: { item: Item }): React.JSX.Element | null {
     default:
       return null;
   }
-}
+});
 
 function FadeIn({ children }: { children: React.ReactNode }): React.JSX.Element {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -900,6 +975,8 @@ const styles = StyleSheet.create({
   wordmark: { fontSize: 20, fontWeight: '800', letterSpacing: -0.6, lineHeight: 22 },
   status: { fontFamily: font.mono, fontSize: 10, letterSpacing: 0.4, marginTop: 1, maxWidth: 190 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  clockPill: { height: 34, paddingHorizontal: space(3), borderRadius: 17, borderWidth: 1, justifyContent: 'center' },
+  clockPillText: { fontFamily: font.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
   headerBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 
   list: { flex: 1 },

@@ -2,7 +2,7 @@
   "name": "minimus",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimus — on-device agentic AI demo app (iOS + Android) built on the RunAnywhere SDKs",
+  "description": "Minimus — an on-device agentic harness for small language models on phones",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -12,7 +12,7 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "eval": "npm run start -w @minimus/eval --",
-    "postinstall": "patch-package && node scripts/fix-runanywhere-windows.mjs"
+    "postinstall": "patch-package"
   },
   "devDependencies": {
     "patch-package": "^8.0.1",

@@ -27,6 +27,10 @@ export interface ScheduledTask {
   createdAtMs: number;
   status: 'pending' | 'running' | 'done' | 'failed';
   result?: string;
+  /** 'daily': after running, re-arm for the same clock time tomorrow. */
+  repeat?: 'daily';
+  /** Free-form tag so a feature can find and replace its own task (e.g. 'daily-brief'). */
+  tag?: string;
 }
 
 /** Runs one agent turn for a scheduled instruction; returns the final answer. */
@@ -137,13 +141,15 @@ export const scheduler = {
     return () => listeners.delete(listener);
   },
 
-  async schedule(instruction: string, dueAtMs: number): Promise<ScheduledTask> {
+  async schedule(instruction: string, dueAtMs: number, options: { repeat?: 'daily'; tag?: string } = {}): Promise<ScheduledTask> {
     const task: ScheduledTask = {
-      id: `t_${Date.now().toString(36)}`,
+      id: `t_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
       instruction,
       dueAtMs,
       createdAtMs: Date.now(),
       status: 'pending',
+      ...(options.repeat ? { repeat: options.repeat } : {}),
+      ...(options.tag ? { tag: options.tag } : {}),
     };
     const tasks = await loadAll();
     tasks.push(task);
@@ -153,6 +159,12 @@ export const scheduler = {
 
   async listPending(): Promise<ScheduledTask[]> {
     return (await loadAll()).filter((t) => t.status === 'pending');
+  },
+
+  /** Remove every pending task carrying a tag (used to replace a recurring one). */
+  async cancelTagged(tag: string): Promise<void> {
+    const tagged = (await loadAll()).filter((t) => t.tag === tag && t.status === 'pending');
+    for (const t of tagged) await scheduler.cancel(t.id);
   },
 
   async cancel(id: string): Promise<void> {
@@ -192,6 +204,14 @@ export const scheduler = {
         if (done) {
           listeners.forEach((l) => l(done));
           notify('Scheduled task done', result.slice(0, 180) || task.instruction);
+        }
+        if (task.repeat === 'daily') {
+          // Same clock time tomorrow (skip ahead if the phone was off for days).
+          let next = task.dueAtMs + 86_400_000;
+          while (next <= Date.now()) next += 86_400_000;
+          const again = await scheduler.schedule(task.instruction, next, { repeat: 'daily', ...(task.tag ? { tag: task.tag } : {}) });
+          const mod = (NativeModules as Record<string, { notifyAt?: (at: number, t: string, b: string | null, id: string | null) => Promise<string> }>)['MinimusTools'];
+          void mod?.notifyAt?.(next, 'Minimus has something to do', task.instruction.slice(0, 120), `task-${again.id}`).catch(() => undefined);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

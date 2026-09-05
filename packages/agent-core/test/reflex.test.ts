@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { matchReflex } from '../src/reflex.js';
 
-const tools = new Set(['flashlight', 'set_timer', 'set_brightness', 'device_info', 'open_app', 'run_macro']);
+const tools = new Set(['flashlight', 'set_timer', 'set_alarm', 'set_brightness', 'device_info', 'open_app', 'run_macro']);
 
 describe('reflexes', () => {
   it('handles the plain flashlight forms', () => {
@@ -27,5 +27,14 @@ describe('reflexes', () => {
   });
   it('never returns a tool that is not available', () => {
     expect(matchReflex('turn on the flashlight', [], new Set(['device_info']))).toBeNull();
+  });
+
+  it('sets alarms from the plain forms', () => {
+    expect(matchReflex('wake me at 6:45', [], tools)?.call).toMatchObject({ name: 'set_alarm', arguments: { time: '06:45' } });
+    expect(matchReflex('set an alarm for 7', [], tools)?.call).toMatchObject({ name: 'set_alarm', arguments: { time: '07:00' } });
+    expect(matchReflex('alarm at 7:30 pm every day', [], tools)?.call).toMatchObject({ name: 'set_alarm', arguments: { time: '19:30', repeat: 'daily' } });
+    expect(matchReflex('wake me up at 12 am', [], tools)?.call).toMatchObject({ name: 'set_alarm', arguments: { time: '00:00' } });
+    expect(matchReflex('set an alarm for 25:00', [], tools)).toBeNull();
+    expect(matchReflex('set an alarm for tomorrow if it rains', [], tools)).toBeNull();
   });
 });

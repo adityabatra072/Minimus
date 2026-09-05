@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useModelStore } from '../stores/modelStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { allModels } from '../services/models';
+import { listSystemVoices, VoicePipeline } from '../services/voice';
+import { setDailyBrief } from '../services/brief';
 import { space, usePalette } from '../theme';
-import { Button, Field, Header, Label, Row, Screen, Toggle } from '../ui/primitives';
+import { Button, Field, Header, Label, Row, Screen, Segmented, Toggle } from '../ui/primitives';
 
 /**
  * Settings — the controls that change behaviour: which brain answers, whether
@@ -20,6 +22,20 @@ export default function SettingsScreen({ onClose, onOpenBrain }: { onClose: () =
   const setRequireApprovals = useSettingsStore((s) => s.setRequireApprovals);
   const voiceHandsFree = useSettingsStore((s) => s.voiceHandsFree);
   const setVoiceHandsFree = useSettingsStore((s) => s.setVoiceHandsFree);
+  const voice = useSettingsStore((s) => s.voice);
+  const setVoice = useSettingsStore((s) => s.setVoice);
+  const briefTime = useSettingsStore((s) => s.briefTime);
+  const [voices, setVoices] = useState<{ id: string; name: string; quality: string }[]>([]);
+  const [showVoices, setShowVoices] = useState(false);
+  useEffect(() => {
+    void listSystemVoices().then(setVoices);
+  }, []);
+  const currentVoice = voices.find((v) => v.id === voice.systemVoiceId) ?? voices[0];
+  const preview = (voiceId: string) => {
+    const pipeline = new VoicePipeline({ onState: () => undefined, onUtterance: () => undefined });
+    useSettingsStore.getState().setVoice({ systemVoiceId: voiceId });
+    void pipeline.speak('Hi, I am Minimus. Flashlight is on, and your meeting is at three.');
+  };
   const sessions = useSessionStore((s) => s.sessions);
   const deleteSession = useSessionStore((s) => s.deleteSession);
   const [confirmWipe, setConfirmWipe] = useState(false);
@@ -60,14 +76,108 @@ export default function SettingsScreen({ onClose, onOpenBrain }: { onClose: () =
           />
         </Group>
 
+        <Group label="every day">
+          <Row
+            title="Morning brief"
+            subtitle={
+              briefTime
+                ? `At ${briefTime} Minimus gathers your calendar, reminders and alarms and tells you about the day. Needs the app open at that time; a notification brings you back.`
+                : 'A daily run-down of calendar, reminders and alarms at a time you pick.'
+            }
+            first
+            last
+          />
+          <View style={[styles.fields, { borderColor: p.line }]}>
+            <Segmented
+              options={[
+                { value: '', label: 'Off' },
+                { value: '07:00', label: '7:00' },
+                { value: '08:00', label: '8:00' },
+                { value: '09:00', label: '9:00' },
+              ]}
+              value={['', '07:00', '08:00', '09:00'].includes(briefTime) ? briefTime : '08:00'}
+              onChange={(t) => void setDailyBrief(t)}
+            />
+          </View>
+        </Group>
+
         <Group label="voice">
           <Row
             title="Hands-free"
             subtitle='After each answer the mic re-arms and waits for "Minimus …". Off: tap the mic each time.'
             right={<Toggle value={voiceHandsFree} onChange={setVoiceHandsFree} />}
             first
-            last
           />
+          <Row
+            title="Fix what I heard with the model"
+            subtitle="A quick pass repairs misheard words toward your taught phrases and app vocabulary."
+            right={<Toggle value={voice.llmCorrection} onChange={(on) => setVoice({ llmCorrection: on })} />}
+          />
+          <Row
+            title="Voice"
+            subtitle={
+              voice.remoteTts.enabled
+                ? 'Cloud voice (below)'
+                : currentVoice
+                  ? `${currentVoice.name} · ${currentVoice.quality}. For the most natural sound, download a Siri or Enhanced voice in iOS Settings › Accessibility › Spoken Content › Voices.`
+                  : 'System voice'
+            }
+            onPress={() => setShowVoices((v) => !v)}
+          />
+          {showVoices ? (
+            <View style={[styles.fields, { borderColor: p.line }]}>
+              {voices.slice(0, 12).map((v) => (
+                <Row
+                  key={v.id}
+                  title={v.name}
+                  subtitle={`${v.quality}${v.id === (voice.systemVoiceId || voices[0]?.id) ? ' · selected' : ''}`}
+                  onPress={() => {
+                    setVoice({ systemVoiceId: v.id });
+                    setShowVoices(false);
+                    preview(v.id);
+                  }}
+                />
+              ))}
+            </View>
+          ) : null}
+          <View style={[styles.fields, { borderColor: p.line }]}>
+            <Label style={{ marginBottom: space(1) }}>speaking rate</Label>
+            <Segmented
+              options={[
+                { value: 0.85, label: 'Calm' },
+                { value: 1, label: 'Natural' },
+                { value: 1.15, label: 'Brisk' },
+              ]}
+              value={voice.rate}
+              onChange={(rate) => setVoice({ rate })}
+            />
+          </View>
+          <Row
+            title="Cloud voice"
+            subtitle="Speak answers through an OpenAI-compatible speech endpoint instead of the phone's voice."
+            right={<Toggle value={voice.remoteTts.enabled} onChange={(on) => setVoice({ remoteTts: { ...voice.remoteTts, enabled: on } })} />}
+          />
+          {voice.remoteTts.enabled ? (
+            <View style={[styles.fields, { borderColor: p.line }]}>
+              <Field label="Base URL" value={voice.remoteTts.baseUrl} placeholder="https://api.openai.com/v1" keyboardType="url" onChangeText={(v) => setVoice({ remoteTts: { ...voice.remoteTts, baseUrl: v } })} />
+              <Field label="API key" value={voice.remoteTts.apiKey} placeholder="sk-…" secureTextEntry onChangeText={(v) => setVoice({ remoteTts: { ...voice.remoteTts, apiKey: v } })} />
+              <Field label="Model" value={voice.remoteTts.model} placeholder="tts-1" onChangeText={(v) => setVoice({ remoteTts: { ...voice.remoteTts, model: v } })} />
+              <Field label="Voice" value={voice.remoteTts.voice} placeholder="alloy" onChangeText={(v) => setVoice({ remoteTts: { ...voice.remoteTts, voice: v } })} />
+            </View>
+          ) : null}
+          <Row
+            title="Cloud transcription"
+            subtitle="Send each recording to an OpenAI-compatible transcription endpoint when on-device hearing is not enough."
+            right={<Toggle value={voice.remoteStt.enabled} onChange={(on) => setVoice({ remoteStt: { ...voice.remoteStt, enabled: on } })} />}
+            last={!voice.remoteStt.enabled}
+          />
+          {voice.remoteStt.enabled ? (
+            <View style={[styles.fields, { borderColor: p.line }]}>
+              <Field label="Base URL" value={voice.remoteStt.baseUrl} placeholder="https://api.openai.com/v1" keyboardType="url" onChangeText={(v) => setVoice({ remoteStt: { ...voice.remoteStt, baseUrl: v } })} />
+              <Field label="API key" value={voice.remoteStt.apiKey} placeholder="sk-…" secureTextEntry onChangeText={(v) => setVoice({ remoteStt: { ...voice.remoteStt, apiKey: v } })} />
+              <Field label="Model" value={voice.remoteStt.model} placeholder="whisper-1" onChangeText={(v) => setVoice({ remoteStt: { ...voice.remoteStt, model: v } })} />
+            </View>
+          ) : null}
         </Group>
 
         <Group label="data">

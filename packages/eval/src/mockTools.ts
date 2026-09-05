@@ -26,6 +26,7 @@ const CANNED: Record<string, unknown> = {
   calendar_create: { ok: true, event_id: 'evt_123' },
   set_alarm: { ok: true, alarm_id: 'alm_1' },
   set_timer: { ok: true, timer_id: 'tmr_1' },
+  daily_brief: { now: 'Monday 8:02 AM', calendar_today: [{ title: 'Standup', at: '09:30', ends: '09:45' }], reminders_due: [{ title: 'Call dentist' }], alarms: [], timers: [], scheduled_tasks: [] },
   schedule_task: { ok: true, task_id: 'tsk_1' },
   play_music: { ok: true, now_playing: true },
   send_email: { ok: true, status: 'composer_opened' },
@@ -249,6 +250,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
       properties: {
         time: { type: 'string', description: '24h HH:MM, e.g. 07:30' },
         label: { type: 'string' },
+        repeat: { type: 'string', enum: ['once', 'daily'], description: 'daily when the user says every day / weekdays / each morning' },
       },
       required: ['time'],
     },
@@ -283,6 +285,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
       properties: {
         instruction: { type: 'string', description: 'what to do when the time comes' },
         when: { type: 'string', description: 'ISO 8601 datetime or +N minutes, e.g. "+30"' },
+        repeat: { type: 'string', enum: ['once', 'daily'], description: 'daily when the user wants this every day at that time' },
       },
       required: ['instruction', 'when'],
     },

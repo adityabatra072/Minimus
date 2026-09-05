@@ -148,7 +148,52 @@ when it names a tool the model was shown.
   `open_url` and `find_contact` round out the phone tools.
 - `describe_image` runs a separate small vision model on an attached photo.
 
-## 8. Where to look
+## 8. Hearing and speaking
+
+Voice does not use a downloaded model. Hearing is the phone's own speech
+recognizer, run on-device, which is better than any small model we could
+ship and streams words as you say them. It takes a list of words to favour,
+and we give it the app's vocabulary: taught phrase names, "new rule",
+"remind me", "flashlight". That is the cheapest possible fix for the classic
+failure where "wind down" is heard as "wine down".
+
+What the recognizer still gets wrong, the language model repairs. The
+transcript goes through the router lane (its own cache, closed thinking, a
+few dozen tokens) with one instruction: return the sentence the user most
+likely said, given this vocabulary; change nothing else. If the rewrite comes
+back suspiciously long or short, the original is used. This adds about a
+quarter of a second and catches the homophones the recognizer cannot.
+
+Speaking uses the best system voice installed (Settings offers a picker and
+a rate; Siri-class voices sound best and can be downloaded from iOS
+Accessibility settings). A cloud speech endpoint can replace it, and a cloud
+transcription endpoint can replace hearing, both OpenAI-compatible.
+
+Two ways in without typing: the mic button (push-to-talk with live words in
+the composer), and "Talk to Minimus", a Siri phrase and Shortcut that opens
+the app listening and speaks the answer. Hands-free mode re-arms the mic
+after each answer and waits for "Minimus …".
+
+## 9. The clock
+
+"Wake me at 6:45" is a reflex: it never reaches the model. On iOS 26 alarms
+and timers go through AlarmKit, so they ring on the lock screen exactly like
+the Clock app, with a countdown Live Activity for timers. On older iOS they
+are time-sensitive notifications and the Clock screen says so. The store
+reconciles its list with the system every few seconds, so an alarm stopped
+from the lock screen shows as off in the app. The chat header carries a
+small pill with the soonest timer or next alarm; tapping it opens the Clock
+screen, which also has a stopwatch.
+
+## 10. History and new chats
+
+The app opens to a new chat. Reopening an older one from Chats feeds its
+transcript (a few thousand characters, most recent first) back to the model
+as prior turns, so "what did we decide?" works. The system prompt still
+never changes, so the cache is kept; history sits between it and the new
+message.
+
+## 11. Where to look
 
 | Question | File |
 |---|---|
@@ -159,3 +204,8 @@ when it names a tool the model was shown.
 | Per-turn thinking, retries, refusals | `packages/agent-core/src/loop.ts` |
 | Engine, lanes, warm-up, thermal budget | `apps/mobile/src/services/engine.ts`, `LocalAdapter.ts`, `stores/modelStore.ts` |
 | Driving the phone from a laptop | `scripts/qa/qa.mjs`, `scripts/qa/seq.sh` |
+| Hearing, transcript repair, speaking | `apps/mobile/src/services/voice.ts`, `ios/MinimusTools/MinimusSpeech.swift`, `MinimusAlarms.swift` |
+| Alarms, timers, stopwatch | `apps/mobile/src/services/clock.ts`, `screens/ClockScreen.tsx`, `ios/MinimusTools/MinimusAlarms.swift` |
+| Siri and Shortcuts entry points | `apps/mobile/ios/mobile/MinimusIntents.swift`, deep links in `screens/ChatScreen.tsx` |
+| Morning brief | `apps/mobile/src/services/brief.ts`, `daily_brief` in `tools/scheduleTools.ts` |
+

@@ -137,10 +137,12 @@ tool. Current scores for LFM2.5-2.6B: 90 to 94% general, 100% demos.
 Curated for a 6 GB phone: LFM2.5-2.6B (default; thinks when the ask needs
 judgment), LFM2.5-1.2B-Instruct (fast, weaker at picking tools: 19 to 31% on
 the general suite, offered as an explicit choice), LFM2-1.2B-Tool, Qwen3.5-4B
-for big devices, plus any GGUF from Hugging Face via the Brain screen. Whisper
-Tiny, Piper and SmolVLM-500M download on first use.
+for big devices, plus any GGUF from Hugging Face via the Brain screen. SmolVLM-500M
+downloads the first time a photo is attached. Voice needs no download: hearing
+is Apple's on-device recognizer, speaking is the system voice (or a cloud
+endpoint you configure).
 
 ## License
 
-Apache 2.0. See `LICENSE`. The RunAnywhere SDK used for the voice pipeline and
-llama.rn carry their own licenses.
+Apache 2.0. See `LICENSE`. llama.rn (llama.cpp) carries its own license. Voice
+uses the phone's own recognizer and voices; no third-party SDK.

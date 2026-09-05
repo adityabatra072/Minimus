@@ -27,31 +27,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - MinimusTools (0.1.0):
+  - MinimusTools (0.2.0):
     - React-Core
-  - NitroModules (0.33.9):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-callinvoker
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
   - RCTDeprecation (0.85.3)
   - RCTRequired (0.85.3)
   - RCTSwiftUI (0.85.3)
@@ -1451,28 +1428,6 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-blob-util (0.22.2):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
   - react-native-image-picker (8.2.1):
     - hermes-engine
     - RCTRequired
@@ -1997,55 +1952,6 @@ PODS:
     - React-Core
   - RNFS (2.20.0):
     - React-Core
-  - RunAnywhereCore (0.20.14):
-    - hermes-engine
-    - NitroModules
-    - RCTRequired
-    - RCTTypeSafety
-    - React-callinvoker
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - Yoga
-  - RunAnywhereONNX (0.20.14):
-    - hermes-engine
-    - NitroModules
-    - RCTRequired
-    - RCTTypeSafety
-    - React-callinvoker
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - RunAnywhereCore
-    - Yoga
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2053,7 +1959,6 @@ DEPENDENCIES:
   - hermes-engine (from `../../../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - llama-rn (from `../../../node_modules/llama.rn`)
   - MinimusTools (from `./MinimusTools`)
-  - NitroModules (from `../../../node_modules/react-native-nitro-modules`)
   - RCTDeprecation (from `../../../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)
   - RCTRequired (from `../../../node_modules/react-native/Libraries/Required`)
   - RCTSwiftUI (from `../../../node_modules/react-native/ReactApple/RCTSwiftUI`)
@@ -2092,7 +1997,6 @@ DEPENDENCIES:
   - React-Mapbuffer (from `../../../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../../../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
   - React-mutationobservernativemodule (from `../../../node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver`)
-  - react-native-blob-util (from `../../../node_modules/react-native-blob-util`)
   - react-native-image-picker (from `../../../node_modules/react-native-image-picker`)
   - react-native-safe-area-context (from `../../../node_modules/react-native-safe-area-context`)
   - react-native-view-shot (from `../../../node_modules/react-native-view-shot`)
@@ -2133,8 +2037,6 @@ DEPENDENCIES:
   - "RNCAsyncStorage (from `../../../node_modules/@react-native-async-storage/async-storage`)"
   - RNDeviceInfo (from `../../../node_modules/react-native-device-info`)
   - RNFS (from `../../../node_modules/react-native-fs`)
-  - "RunAnywhereCore (from `../../../node_modules/@runanywhere/core`)"
-  - "RunAnywhereONNX (from `../../../node_modules/@runanywhere/onnx`)"
   - Yoga (from `../../../node_modules/react-native/ReactCommon/yoga`)
 
 EXTERNAL SOURCES:
@@ -2147,8 +2049,6 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/llama.rn"
   MinimusTools:
     :path: "./MinimusTools"
-  NitroModules:
-    :path: "../../../node_modules/react-native-nitro-modules"
   RCTDeprecation:
     :path: "../../../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2223,8 +2123,6 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   React-mutationobservernativemodule:
     :path: "../../../node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver"
-  react-native-blob-util:
-    :path: "../../../node_modules/react-native-blob-util"
   react-native-image-picker:
     :path: "../../../node_modules/react-native-image-picker"
   react-native-safe-area-context:
@@ -2305,10 +2203,6 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/react-native-device-info"
   RNFS:
     :path: "../../../node_modules/react-native-fs"
-  RunAnywhereCore:
-    :path: "../../../node_modules/@runanywhere/core"
-  RunAnywhereONNX:
-    :path: "../../../node_modules/@runanywhere/onnx"
   Yoga:
     :path: "../../../node_modules/react-native/ReactCommon/yoga"
 
@@ -2316,8 +2210,7 @@ SPEC CHECKSUMS:
   FBLazyVector: 24e62c765683b8d89006a88a2c8f5cf019f0074d
   hermes-engine: 6fb01f468ddeb566aa83b3028ded7c4272619781
   llama-rn: 69d4b7953cc568e0220eaf6332fc8c893332538f
-  MinimusTools: 5b3edbe007713f66325613ea3ac0d9ed253fc08e
-  NitroModules: 7870d5dcc285bb2de2be9d4dfd501db52d13cfd4
+  MinimusTools: 7b8ae083a84aece34e54564f363beb2446cf54ba
   RCTDeprecation: a4c521821fab57cbb125b36effe84d897d0dfa12
   RCTRequired: 9f3a7e5645d4bc3f551593de7550bb66ab6e42bc
   RCTSwiftUI: 239ed2eb9e73de5a6f518810630f0c95e01c8702
@@ -2355,7 +2248,6 @@ SPEC CHECKSUMS:
   React-Mapbuffer: fec3e025f0ffba6b32cd2a1d7bbdee3e269aae90
   React-microtasksnativemodule: ab33a818d339f5a1da308893c11b487be66121a8
   React-mutationobservernativemodule: a42d1626651ccd7d0dc02a56e69d4ec77c248893
-  react-native-blob-util: 6e9ac06872baaa45300ac5ef4d84c2718d843f57
   react-native-image-picker: 23540feacc79c63c60857f318fdfa8477c26e70a
   react-native-safe-area-context: c4a6d0fbf9c77ee28dab7e4d4c369df7753f20d4
   react-native-view-shot: 2829bd78c1fef42db12553bf85833e05a1a73609
@@ -2396,10 +2288,8 @@ SPEC CHECKSUMS:
   RNCAsyncStorage: 2ad919e88b8bc2cd80e8697ce66d04d006743283
   RNDeviceInfo: bcce8752b5043a623fe3c26789679b473f705d3c
   RNFS: 89de7d7f4c0f6bafa05343c578f61118c8282ed8
-  RunAnywhereCore: 343116ba84a847dbe97dd20af45ed9ac6f84f2c1
-  RunAnywhereONNX: da65afb4f95ff4a9c8f0d16491f0f517a39a1df7
   Yoga: 77dfa8673de2874e1855002ae59c68b8be9b007b
 
-PODFILE CHECKSUM: 07b669ce8ee9affb5fec5162d782091bb3414af0
+PODFILE CHECKSUM: 5ad0fc33805ebe3960e2bb7369f8572817e834c0
 
 COCOAPODS: 1.17.0

@@ -68,6 +68,13 @@ export interface AgentRunConfig {
   deliberate?: boolean;
   /** Clock for the context block — defaults to now; fixed in tests. */
   now?: Date;
+  /**
+   * Earlier turns of this conversation (user and assistant text only), so a
+   * reopened chat or a follow-up question has what came before in view. The
+   * app caps them by size; they sit after the constant prompt, so the cache
+   * still serves the tool list.
+   */
+  history?: { role: 'user' | 'assistant'; content: string }[];
   approvals?: ApprovalHandler;
   onCheckpoint?: (cp: RunCheckpoint) => void | Promise<void>;
   signal?: AbortSignal;
@@ -201,6 +208,7 @@ export class AgentLoop {
       const contextBlock = buildContextBlock(splitPreamble(config.preamble).context, config.now);
       messages = [
         { role: 'system', content: systemPrompt },
+        ...(config.history ?? []).map((h): ChatMessage => (h.role === 'user' ? { role: 'user', content: h.content } : { role: 'assistant', content: h.content })),
         { role: 'system', content: contextBlock },
         { role: 'user', content: userInput },
       ];

@@ -91,10 +91,12 @@ export const DEFAULT_POLICIES: ModelPolicy[] = [
     topK: 50,
     repeatPenalty: 1.1,
     thinking: true,
-    thinkingBudgetTokens: 512,
+    // 384 rather than 512: on the phone every thinking token is heat, and the
+    // passing teach runs settled at ~300 tokens of deliberation.
+    thinkingBudgetTokens: 384,
     thinkingStrategy: 'adaptive',
     contextWindowTokens: 8192,
-    maxOutputTokens: 1024,
+    maxOutputTokens: 768,
     toolResultCharCap: 6000,
   },
   {

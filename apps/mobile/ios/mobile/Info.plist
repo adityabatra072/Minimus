@@ -51,6 +51,8 @@
 	<string>The agent adds events you ask for to your calendar.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>The agent adds events you ask for to your calendar.</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Alarms and timers you ask for ring like the Clock app's, even when Minimus is closed.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Look up a person you name so a message or call reaches the right number. Contacts never leave this phone.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
@@ -68,6 +70,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Turns what you say into text, on this phone. Speech never leaves the device unless you enable a cloud voice endpoint.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The voice assistant listens when you tap the mic or say the wake phrase. Audio never leaves this phone.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

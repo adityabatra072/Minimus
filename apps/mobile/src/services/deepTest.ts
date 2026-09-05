@@ -1,4 +1,3 @@
-import { RunAnywhere, AudioInputs } from '@runanywhere/core';
 import { getToolRegistry } from '../tools';
 import { useToolStore } from '../stores/toolStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -7,9 +6,8 @@ import { loadMacros, removeMacro } from '../tools/macroTools';
 import { listMemories, removeMemory } from '../tools/memoryTools';
 import { scheduler } from './scheduler';
 import { McpClient } from './mcp';
-import { ensureVoiceReady } from './voice';
+import { listSystemVoices, voiceAvailable } from './voice';
 import { VLM_MODEL, isDownloaded } from './models';
-import { ensureVoiceSdk } from './sdk';
 import type { CheckResult } from './selfTest';
 
 /**
@@ -89,7 +87,7 @@ async function checkDeviceTools(): Promise<string> {
 
 async function checkNotificationTools(): Promise<string> {
   const notifyResult = await callTool('send_notification', {
-    title: 'RunAnywhere QA',
+    title: 'Minimus QA',
     body: 'Deep check notification',
   });
   if (/no_permission|error/i.test(notifyResult)) {
@@ -105,7 +103,7 @@ async function checkCalendarWrite(): Promise<string> {
   start.setMinutes(0, 0, 0);
   const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}T${String(start.getHours()).padStart(2, '0')}:00:00`;
   const created = await callTool('calendar_create', {
-    title: 'RunAnywhere QA probe',
+    title: 'Minimus QA probe',
     start: iso,
     duration_minutes: 15,
   });
@@ -185,63 +183,16 @@ async function checkMcpServers(): Promise<string> {
   return reports.join('; ');
 }
 
-async function checkVoiceRoundTrip(): Promise<string> {
-  // The honest end-to-end voice test without a microphone: synthesize speech
-  // with the on-device TTS, then transcribe that audio with the on-device STT
-  // and check the words survive the round trip.
-  await ensureVoiceSdk();
-  await ensureVoiceReady(() => undefined);
-  const phrase = 'turn on the flashlight';
-  const audio = await RunAnywhere.tts.synthesize(phrase);
-  if (!audio.data || audio.data.length < 1000) throw new Error('TTS produced no audio');
-  // What TTS hands back is not necessarily raw samples: a WAV container's
-  // 44-byte header read as PCM is why this first transcribed "(wind)" and
-  // then "(static)". Detect the container, and only hand-resample when the
-  // buffer really is bare PCM (Piper runs at 22.05kHz, Whisper wants 16kHz).
-  const isRiff =
-    audio.data.length > 12 &&
-    audio.data[0] === 0x52 &&
-    audio.data[1] === 0x49 &&
-    audio.data[2] === 0x46 &&
-    audio.data[3] === 0x46;
-  let input;
-  if (isRiff) {
-    input = AudioInputs.wav(audio.data, audio.sampleRate || 22050);
-  } else {
-    const source = new Int16Array(
-      audio.data.buffer,
-      audio.data.byteOffset,
-      Math.floor(audio.data.byteLength / 2),
-    );
-    // Linear interpolation, not nearest-neighbour: 22050 to 16000 is a
-    // fractional ratio, and dropping samples aliased the speech badly enough
-    // that Whisper transcribed it as "(wind)".
-    const ratio = (audio.sampleRate || 22050) / 16000;
-    const resampled = new Int16Array(Math.floor(source.length / ratio));
-    for (let i = 0; i < resampled.length; i++) {
-      const pos = i * ratio;
-      const left = Math.floor(pos);
-      const frac = pos - left;
-      const a = source[left] ?? 0;
-      const b = source[left + 1] ?? a;
-      resampled[i] = Math.round(a + (b - a) * frac);
-    }
-    input = AudioInputs.pcm16(new Uint8Array(resampled.buffer), 16000);
-  }
-  const transcription = await RunAnywhere.stt.transcribe(input);
-  const heard = transcription.text.toLowerCase();
-  const hit = ['flashlight', 'flash light', 'turn on'].some((w) => heard.includes(w));
-  const shape = `${audio.format ?? 'unknown'}, ${audio.sampleRate}Hz, ${audio.data.length}B`;
-  if (hit) return `spoke and heard back "${transcription.text.trim().slice(0, 40)}"`;
-  // Both engines ran: TTS produced real audio and STT returned a
-  // transcription. Only the synthetic hand-off between them is imperfect, and
-  // the app never does that hand-off — the microphone path captures at 16kHz
-  // and feeds STT directly. Report it honestly instead of failing the run or
-  // pretending it passed.
-  if (transcription.text.trim() !== '') {
-    return `partial: TTS made ${Math.round(audio.durationMs)}ms of audio (${shape}); STT ran but heard "${transcription.text.trim().slice(0, 30)}" (synthetic hand-off only; the mic path is 16kHz)`;
-  }
-  throw new Error(`STT returned nothing for synthesized speech (${shape})`);
+async function checkVoiceStack(): Promise<string> {
+  // Voice runs on the phone's own recognizer and synthesizer, so without a
+  // microphone the honest check is: are both native modules present, and is
+  // there at least one English voice to speak with. Recording itself is
+  // exercised by tapping the mic (QA: `voice` scenario).
+  if (!voiceAvailable()) throw new Error('MinimusSpeech / MinimusAlarms native modules missing');
+  const voices = await listSystemVoices();
+  if (voices.length === 0) throw new Error('no system voices reported');
+  const best = voices[0]!;
+  return `${voices.length} system voices; best "${best.name}" (${best.quality})`;
 }
 
 async function checkVisionModel(): Promise<string> {
@@ -266,7 +217,7 @@ const DEEP_CHECKS: { name: string; run: () => Promise<string> }[] = [
   { name: 'Custom HTTP tools', run: checkCustomHttpTool },
   { name: 'MCP servers', run: checkMcpServers },
   { name: 'Vision model', run: checkVisionModel },
-  { name: 'Voice round trip (TTS to STT)', run: checkVoiceRoundTrip },
+  { name: 'Voice stack (recognizer + voices)', run: checkVoiceStack },
 ];
 
 export async function runDeepChecks(
