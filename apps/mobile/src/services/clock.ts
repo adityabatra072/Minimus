@@ -156,6 +156,13 @@ interface ClockState {
     repeatsDaily?: boolean,
   ) => Promise<ClockAlarm>;
   removeAlarm: (alarmId: string) => Promise<void>;
+  /** Change time, label or repeat of an alarm; re-arms it natively. */
+  updateAlarm: (
+    alarmId: string,
+    patch: Partial<Pick<ClockAlarm, 'hour' | 'minute' | 'label' | 'repeatsDaily'>>,
+  ) => Promise<ClockAlarm>;
+  /** Add (or take away) seconds on a running or paused timer. */
+  extendTimer: (timerId: string, deltaSeconds: number) => Promise<ClockTimer>;
   toggleAlarm: (alarmId: string, enabled: boolean) => Promise<void>;
   startTimer: (seconds: number, label: string) => Promise<ClockTimer>;
   pauseTimer: (timerId: string) => Promise<void>;
@@ -208,6 +215,17 @@ export const useClockStore = create<ClockState>((set, get) => ({
   },
 
   addAlarm: async (hour, minute, label, repeatsDaily = false) => {
+    // One alarm per clock time: asking twice re-arms the existing one (and
+    // applies a new label or repeat) instead of stacking duplicates.
+    const existing = get().alarms.find(a => a.hour === hour && a.minute === minute);
+    if (existing) {
+      const patched = await get().updateAlarm(existing.id, {
+        ...(label ? { label } : {}),
+        ...(repeatsDaily ? { repeatsDaily } : {}),
+      });
+      if (!patched.enabled) await get().toggleAlarm(existing.id, true);
+      return { ...patched, enabled: true };
+    }
     const useKit = await alarmKitAvailable();
     let nativeId = '';
     if (useKit && alarmKit) {
@@ -239,6 +257,50 @@ export const useClockStore = create<ClockState>((set, get) => ({
     persist({ ...get(), alarms });
     diag(`clock: alarm ${formatClock(hour, minute)} via ${alarm.backend}`);
     return alarm;
+  },
+
+  updateAlarm: async (alarmId, patch) => {
+    const alarm = get().alarms.find(a => a.id === alarmId);
+    if (!alarm) throw new Error('no such alarm');
+    const next: ClockAlarm = { ...alarm, ...patch };
+    if (alarm.enabled) {
+      if (alarm.backend === 'alarmkit' && alarmKit) {
+        if (alarm.nativeId) await alarmKit.alarmCancel(alarm.nativeId).catch(() => undefined);
+        next.nativeId = await alarmKit.alarmSchedule(next.hour, next.minute, next.label, next.repeatsDaily);
+      } else if (tools) {
+        await tools.setAlarm(next.hour, next.minute, next.label || null);
+      }
+    }
+    const alarms = get()
+      .alarms.map(a => (a.id === alarmId ? next : a))
+      .sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+    set({ alarms });
+    persist({ ...get(), alarms });
+    return next;
+  },
+
+  extendTimer: async (timerId, deltaSeconds) => {
+    const t = get().timers.find(x => x.id === timerId);
+    if (!t || t.state === 'done') throw new Error('no such running timer');
+    const remaining = Math.max(1, timerRemainingSeconds(t) + deltaSeconds);
+    // AlarmKit timers cannot be extended in place: stop this one and start a
+    // fresh one for the new remaining time under the same label.
+    if (t.backend === 'alarmkit' && t.nativeId) {
+      await alarmKit?.alarmCancel(t.nativeId).catch(() => undefined);
+    }
+    let nativeId = '';
+    if (t.state === 'running') {
+      if (t.backend === 'alarmkit' && alarmKit) nativeId = await alarmKit.timerStart(remaining, t.label);
+      else if (tools) await tools.setTimer(remaining, t.label || null);
+    }
+    const next: ClockTimer =
+      t.state === 'paused'
+        ? { ...t, pausedRemaining: remaining, nativeId: '' }
+        : { ...t, durationSeconds: remaining, startedAtMs: Date.now(), nativeId };
+    const timers = get().timers.map(x => (x.id === timerId ? next : x));
+    set({ timers });
+    persist({ ...get(), timers });
+    return next;
   },
 
   removeAlarm: async alarmId => {
@@ -321,9 +383,15 @@ export const useClockStore = create<ClockState>((set, get) => ({
   resumeTimer: async timerId => {
     const t = get().timers.find(x => x.id === timerId);
     if (!t || t.state !== 'paused') return;
-    if (t.backend === 'alarmkit')
-      await alarmKit?.alarmResume(t.nativeId).catch(() => undefined);
     const remaining = t.pausedRemaining ?? 0;
+    let nativeId = t.nativeId;
+    if (t.backend === 'alarmkit' && alarmKit) {
+      // A timer extended while paused has no native counterpart yet.
+      if (nativeId) await alarmKit.alarmResume(nativeId).catch(() => undefined);
+      else nativeId = await alarmKit.timerStart(Math.max(1, remaining), t.label);
+    } else if (!nativeId && tools) {
+      await tools.setTimer(Math.max(1, remaining), t.label || null);
+    }
     const timers = get().timers.map(x =>
       x.id === timerId
         ? {
@@ -332,6 +400,7 @@ export const useClockStore = create<ClockState>((set, get) => ({
             pausedRemaining: undefined,
             durationSeconds: remaining,
             startedAtMs: Date.now(),
+            nativeId,
           }
         : x,
     );
@@ -457,6 +526,39 @@ export function formatStopwatch(ms: number): string {
 }
 
 /** What the chat header should show: the soonest running timer, else the next alarm. */
+/** Parse "6:45", "06:45", "6:45 pm", "7pm" into 24h hour/minute; null when it is not a time. */
+export function parseClockTime(text: string): { hour: number; minute: number } | null {
+  const m = /^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\s*$/i.exec(text);
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const minute = m[2] ? Number(m[2]) : 0;
+  const mer = m[3]?.replace(/\./g, '').toLowerCase();
+  if (mer === 'pm' && hour < 12) hour += 12;
+  if (mer === 'am' && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
+/** Alarms matching a time ("6:45"), a label, or both; all enabled alarms when neither is given. */
+export function findAlarms(alarms: ClockAlarm[], query: { time?: string; label?: string }): ClockAlarm[] {
+  const t = query.time ? parseClockTime(query.time) : null;
+  const label = query.label?.trim().toLowerCase();
+  return alarms.filter(a => {
+    if (t && (a.hour !== t.hour || a.minute !== t.minute)) return false;
+    if (label && !a.label.toLowerCase().includes(label) && !label.includes(a.label.toLowerCase() || '\u0000')) return false;
+    return true;
+  });
+}
+
+/** Timers matching a label, else every live timer (soonest first). */
+export function findTimers(timers: ClockTimer[], label?: string): ClockTimer[] {
+  const l = label?.trim().toLowerCase();
+  return timers
+    .filter(t => t.state !== 'done')
+    .filter(t => !l || t.label.toLowerCase().includes(l) || l.includes(t.label.toLowerCase() || '\u0000'))
+    .sort((a, b) => timerRemainingSeconds(a) - timerRemainingSeconds(b));
+}
+
 export function clockHeadline(
   state: Pick<ClockState, 'alarms' | 'timers'>,
   now = Date.now(),

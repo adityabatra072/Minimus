@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { matchReflex } from '../src/reflex.js';
 
-const tools = new Set(['flashlight', 'set_timer', 'set_alarm', 'set_brightness', 'device_info', 'open_app', 'run_macro']);
+const tools = new Set(['flashlight', 'set_timer', 'set_alarm', 'cancel_alarm', 'timer_control', 'set_brightness', 'device_info', 'open_app', 'run_macro']);
 
 describe('reflexes', () => {
   it('handles the plain flashlight forms', () => {
@@ -43,5 +43,16 @@ describe('reflexes', () => {
     expect(matchReflex('start a 10 minute timer', [], tools)?.call).toMatchObject({ name: 'set_timer', arguments: { minutes: 10 } });
     expect(matchReflex('set a timer for 12 min', [], tools)?.call).toMatchObject({ name: 'set_timer', arguments: { minutes: 12 } });
     expect(matchReflex('timer for the pasta', [], tools)).toBeNull();
+  });
+
+  it('cancels and controls timers and alarms', () => {
+    expect(matchReflex('cancel the timer', [], tools)?.call).toMatchObject({ name: 'timer_control', arguments: { action: 'cancel' } });
+    expect(matchReflex('pause my timer', [], tools)?.call).toMatchObject({ name: 'timer_control', arguments: { action: 'pause' } });
+    expect(matchReflex('resume the timer', [], tools)?.call).toMatchObject({ name: 'timer_control', arguments: { action: 'resume' } });
+    expect(matchReflex('cancel my 6:45 alarm', [], tools)?.call).toMatchObject({ name: 'cancel_alarm', arguments: { time: '06:45' } });
+    expect(matchReflex('turn off the alarm at 7 pm', [], tools)?.call).toMatchObject({ name: 'cancel_alarm', arguments: { time: '19:00' } });
+    expect(matchReflex('delete all my alarms', [], tools)?.call).toMatchObject({ name: 'cancel_alarm', arguments: { all: true } });
+    expect(matchReflex('cancel the alarm if I am awake', [], tools)).toBeNull();
+    expect(matchReflex('move my alarm to 7', [], tools)).toBeNull();
   });
 });

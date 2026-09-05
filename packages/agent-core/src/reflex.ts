@@ -82,6 +82,42 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
     },
   },
   {
+    // "cancel the timer", "stop my timer", "pause the timer", "resume the timer"
+    re: /^(?:please )?(cancel|stop|kill|pause|resume|unpause|continue) (?:the |my )?timer$/,
+    make: (m) => {
+      const verb = m[1]!.toLowerCase();
+      const action = verb === 'pause' ? 'pause' : verb === 'resume' || verb === 'unpause' || verb === 'continue' ? 'resume' : 'cancel';
+      return {
+        call: { id: id(), name: 'timer_control', arguments: { action } },
+        confirm: action === 'cancel' ? 'Timer cancelled.' : action === 'pause' ? 'Timer paused.' : 'Timer running again.',
+      };
+    },
+  },
+  {
+    // "cancel my 6:45 alarm", "delete the 7 am alarm", "turn off the alarm at 6:45"
+    re: /^(?:please )?(?:cancel|delete|remove|turn off|switch off|disable) (?:the |my )?(?:alarm (?:for |at )?)?(\d{1,2})(?::(\d{2}))? ?(am|pm|a\.m\.|p\.m\.)?(?: alarm)?$/,
+    make: (m) => {
+      let hour = Number(m[1]);
+      const minute = m[2] ? Number(m[2]) : 0;
+      const mer = m[3]?.replace(/\./g, '').toLowerCase();
+      if (!Number.isFinite(hour) || hour > 23 || minute > 59) return null;
+      if (mer === 'pm' && hour < 12) hour += 12;
+      if (mer === 'am' && hour === 12) hour = 0;
+      const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      const shown = new Date();
+      shown.setHours(hour, minute, 0, 0);
+      return {
+        call: { id: id(), name: 'cancel_alarm', arguments: { time } },
+        confirm: `Alarm for ${shown.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} cancelled.`,
+      };
+    },
+  },
+  {
+    // "cancel all alarms", "delete all my alarms"
+    re: /^(?:please )?(?:cancel|delete|remove|turn off|clear) (?:all|every) (?:of )?(?:my |the )?alarms?$/,
+    make: () => ({ call: { id: id(), name: 'cancel_alarm', arguments: { all: true } }, confirm: 'All alarms cancelled.' }),
+  },
+  {
     re: /^(?:set|put|turn|change) (?:the )?(?:screen )?brightness (?:to |at )?(\d{1,3}) ?(?:%|percent)$/,
     make: (m) => {
       const pct = Math.max(0, Math.min(100, Number(m[1])));

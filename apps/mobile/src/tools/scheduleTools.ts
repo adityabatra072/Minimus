@@ -3,9 +3,12 @@ import type { ToolDefinition } from '@minimus/agent-core';
 import { parseWhen, scheduler } from '../services/scheduler';
 import { diag } from '../services/diag';
 import {
+  findAlarms,
+  findTimers,
   formatClock,
   formatDuration,
   nextAlarmFire,
+  parseClockTime,
   timerRemainingSeconds,
   useClockStore,
 } from '../services/clock';
@@ -110,7 +113,7 @@ export function scheduleTools(): ToolDefinition[] {
       kind: 'action',
       group: 'schedule',
       description:
-        'Set an alarm clock that rings at a time of day (a real alarm, like the Clock app). It only rings — it cannot check or do anything.',
+        'Set a NEW alarm that rings at a time of day (a real alarm, like the Clock app). It only rings — it cannot check or do anything. To move or remove an existing alarm use change_alarm / cancel_alarm.',
       parameters: {
         type: 'object',
         properties: {
@@ -359,6 +362,153 @@ export function scheduleTools(): ToolDefinition[] {
               at: hhmm(t.dueAtMs),
             })),
         };
+      },
+    },
+    {
+      name: 'list_alarms',
+      kind: 'query',
+      group: 'schedule',
+      description: 'Every alarm and running timer on the phone: times, labels, on/off, time left.',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const c = useClockStore.getState();
+        return {
+          alarms: c.alarms.map(a => ({
+            time: formatClock(a.hour, a.minute),
+            label: a.label || undefined,
+            enabled: a.enabled,
+            repeats: a.repeatsDaily ? 'daily' : 'once',
+          })),
+          timers: c.timers
+            .filter(t => t.state !== 'done')
+            .map(t => ({ label: t.label || 'timer', remaining: formatDuration(timerRemainingSeconds(t)), state: t.state })),
+        };
+      },
+    },
+    {
+      name: 'cancel_alarm',
+      kind: 'action',
+      group: 'schedule',
+      description: 'Remove an alarm (by its time, its label, or all of them). Use for "cancel / delete / turn off my alarm".',
+      parameters: {
+        type: 'object',
+        properties: {
+          time: { type: 'string', description: 'the alarm time, e.g. 06:45 or 7 pm' },
+          label: { type: 'string', description: 'the alarm label, if the user named it' },
+          all: { type: 'boolean', description: 'true to remove every alarm' },
+          disable_only: { type: 'boolean', description: 'true to switch it off but keep it in the list' },
+        },
+      },
+      execute: async args => {
+        const c = useClockStore.getState();
+        let hits = args['all'] === true ? c.alarms : findAlarms(c.alarms, { ...(args['time'] ? { time: String(args['time']) } : {}), ...(args['label'] ? { label: String(args['label']) } : {}) });
+        if (!args['all'] && !args['time'] && !args['label']) hits = hits.filter(a => a.enabled);
+        const listed = (xs: typeof c.alarms) => xs.map(a => `${formatClock(a.hour, a.minute)}${a.label ? ` (${a.label})` : ''}`).join(', ');
+        if (hits.length === 0) {
+          throw new Error(c.alarms.length === 0 ? 'No alarm is set.' : `No alarm is set for that. Alarms: ${listed(c.alarms)}.`);
+        }
+        if (hits.length > 1 && !args['all']) {
+          throw new Error(`Several alarms match (${listed(hits)}). Ask the user which one, or cancel all.`);
+        }
+        const removed: string[] = [];
+        for (const a of hits) {
+          if (args['disable_only'] === true) await c.toggleAlarm(a.id, false);
+          else await c.removeAlarm(a.id);
+          removed.push(`${formatClock(a.hour, a.minute)}${a.label ? ` ${a.label}` : ''}`);
+        }
+        return { ok: true, removed, ...(args['disable_only'] === true ? { disabled_only: true } : {}), remaining_alarms: useClockStore.getState().alarms.filter(a => a.enabled).length };
+      },
+    },
+    {
+      name: 'change_alarm',
+      kind: 'action',
+      group: 'schedule',
+      description: 'Move an existing alarm to a new time, rename it, make it daily or one-off, or switch it back on. Identify it by its current time or label.',
+      parameters: {
+        type: 'object',
+        properties: {
+          time: { type: 'string', description: 'current time of the alarm to change, e.g. 06:45 (omit when only one alarm exists)' },
+          label: { type: 'string', description: 'current label, if the user named it' },
+          new_time: { type: 'string', description: 'new time, 24h HH:MM' },
+          new_label: { type: 'string' },
+          repeat: { type: 'string', enum: ['once', 'daily'] },
+          enabled: { type: 'boolean', description: 'true to switch on, false to switch off' },
+        },
+      },
+      execute: async args => {
+        const c = useClockStore.getState();
+        let hits = findAlarms(c.alarms, { ...(args['time'] ? { time: String(args['time']) } : {}), ...(args['label'] ? { label: String(args['label']) } : {}) });
+        // With a single alarm there is nothing to disambiguate: take it even
+        // when the model put the NEW time in `time` (seen on device: "move my
+        // alarm to 7:15" arrived as time="07:15", no new_time).
+        if (hits.length === 0 && c.alarms.length === 1) {
+          hits = c.alarms;
+          if (args['time'] && !args['new_time']) args = { ...args, new_time: args['time'] };
+        }
+        if (hits.length !== 1) {
+          const listed = c.alarms.map(a => `${formatClock(a.hour, a.minute)}${a.label ? ` (${a.label})` : ''}`).join(', ');
+          if (hits.length === 0) throw new Error(c.alarms.length === 0 ? 'No alarm is set; use set_alarm to create one.' : `No alarm matches that time. Alarms: ${listed}.`);
+          throw new Error(`Several alarms match (${listed}). Ask the user which one.`);
+        }
+        const target = hits[0]!;
+        const patch: { hour?: number; minute?: number; label?: string; repeatsDaily?: boolean } = {};
+        if (args['new_time']) {
+          const t = parseClockTime(String(args['new_time']));
+          if (!t) throw new Error('new_time must be 24h HH:MM, e.g. 07:30');
+          patch.hour = t.hour;
+          patch.minute = t.minute;
+        }
+        if (typeof args['new_label'] === 'string') patch.label = String(args['new_label']);
+        if (args['repeat'] === 'daily' || args['repeat'] === 'once') patch.repeatsDaily = args['repeat'] === 'daily';
+        let updated = target;
+        if (Object.keys(patch).length > 0) updated = await c.updateAlarm(target.id, patch);
+        if (typeof args['enabled'] === 'boolean') {
+          await c.toggleAlarm(target.id, args['enabled']);
+          updated = { ...updated, enabled: args['enabled'] };
+        }
+        return { ok: true, was: formatClock(target.hour, target.minute), now: formatClock(updated.hour, updated.minute), label: updated.label || undefined, repeats: updated.repeatsDaily ? 'daily' : 'once', enabled: updated.enabled };
+      },
+    },
+    {
+      name: 'timer_control',
+      kind: 'action',
+      group: 'schedule',
+      description: 'Pause, resume, cancel, or add/remove minutes on a running timer. With one timer running no label is needed.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['pause', 'resume', 'cancel', 'add_minutes'] },
+          minutes: { type: 'number', description: 'for add_minutes: minutes to add (negative to take away)' },
+          label: { type: 'string', description: 'which timer, when several are running' },
+          all: { type: 'boolean', description: 'apply to every timer' },
+        },
+        required: ['action'],
+      },
+      execute: async args => {
+        const c = useClockStore.getState();
+        const action = String(args['action']);
+        let hits = findTimers(c.timers, args['label'] ? String(args['label']) : undefined);
+        if (hits.length === 0) throw new Error('No timer is running.');
+        if (hits.length > 1 && !args['all'] && !args['label'] && (action === 'add_minutes' || action === 'cancel')) {
+          throw new Error(`Several timers are running (${hits.map(t => `${t.label || 'timer'} ${formatDuration(timerRemainingSeconds(t))}`).join(', ')}). Ask the user which one, or use all.`);
+        }
+        if (!args['all'] && hits.length > 1) hits = [hits[0]!];
+        const done: string[] = [];
+        for (const t of hits) {
+          const name = t.label || 'timer';
+          if (action === 'pause') await c.pauseTimer(t.id);
+          else if (action === 'resume') await c.resumeTimer(t.id);
+          else if (action === 'cancel') await c.cancelTimer(t.id);
+          else if (action === 'add_minutes') {
+            const mins = Number(args['minutes']);
+            if (!Number.isFinite(mins) || mins === 0) throw new Error('minutes must be a non-zero number');
+            const next = await c.extendTimer(t.id, Math.round(mins * 60));
+            done.push(`${name}: now ${formatDuration(timerRemainingSeconds(next))} left`);
+            continue;
+          } else throw new Error('action must be pause, resume, cancel or add_minutes');
+          done.push(`${name}: ${action}${action === 'cancel' ? 'led' : 'd'}`);
+        }
+        return { ok: true, action, timers: done };
       },
     },
     {

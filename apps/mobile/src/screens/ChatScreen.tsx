@@ -273,7 +273,16 @@ export default function ChatScreen({ onOpen }: { onOpen: (d: Destination) => voi
             const resultText = typeof raw === 'string' ? raw : JSON.stringify(raw);
             const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
             const summary = resultFor(reflex.call, resultText, false);
-            const text = typeof reflex.confirm === 'function' ? reflex.confirm(parsed) : reflex.confirm;
+            // A reflex's confirmation is written before the tool runs; when the
+            // tool reports ok:false ("No alarm matches"), say that instead.
+            const text =
+              parsed && parsed['ok'] === false
+                ? typeof parsed['note'] === 'string'
+                  ? parsed['note']
+                  : summary
+                : typeof reflex.confirm === 'function'
+                  ? reflex.confirm(parsed)
+                  : reflex.confirm;
             const ops: Operation[] = [{ id: reflex.call.id, verb: verbFor(reflex.call), status: 'reflex', result: summary }];
             const footer: ReceiptFooter = { steps: 1, seconds: (Date.now() - runStartedAt) / 1000, via: 'instant' };
             upsertReceipt(() => ops, footer);

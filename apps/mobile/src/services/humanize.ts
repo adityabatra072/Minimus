@@ -55,6 +55,16 @@ export function verbFor(call: ToolCall): string {
       const m = Number(a['minutes']);
       return `Starting a ${Number.isFinite(m) ? m : '…'} min timer`;
     }
+    case 'list_alarms':
+      return 'Checking alarms and timers';
+    case 'cancel_alarm':
+      return a['all'] === true ? 'Cancelling every alarm' : `Cancelling the ${str(a['time'], str(a['label'], ''))} alarm`.replace('the  alarm', 'alarm');
+    case 'change_alarm':
+      return a['new_time'] ? `Moving the alarm to ${str(a['new_time'])}` : 'Changing the alarm';
+    case 'timer_control': {
+      const act = str(a['action'], '');
+      return act === 'add_minutes' ? `Adding ${typeof a['minutes'] === 'number' ? a['minutes'] : str(a['minutes'], '…')} min to the timer` : act === 'cancel' ? 'Cancelling the timer' : act === 'pause' ? 'Pausing the timer' : 'Resuming the timer';
+    }
     case 'send_notification':
       return 'Posting notification';
     case 'play_music':
@@ -121,6 +131,21 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
     }
     case 'set_alarm':
       return r['alarm_set_for'] ? `Alarm set for ${str(r['alarm_set_for'])}${r['repeats'] === 'daily' ? ', daily' : ''}` : 'Alarm set';
+    case 'list_alarms': {
+      const al = Array.isArray(r['alarms']) ? r['alarms'].length : 0;
+      const tm = Array.isArray(r['timers']) ? r['timers'].length : 0;
+      return `${al} alarm${al === 1 ? '' : 's'}, ${tm} timer${tm === 1 ? '' : 's'}`;
+    }
+    case 'cancel_alarm': {
+      const removed = Array.isArray(r['removed']) ? r['removed'] : [];
+      return removed.length === 0 ? 'Nothing to cancel' : r['disabled_only'] ? `Switched off ${removed.join(', ')}` : `Cancelled ${removed.join(', ')}`;
+    }
+    case 'change_alarm':
+      return r['ok'] === true ? `Alarm ${str(r['was'])} → ${str(r['now'])}${r['enabled'] === false ? ' (off)' : ''}` : str(r['note'], 'No change');
+    case 'timer_control': {
+      const timers = Array.isArray(r['timers']) ? r['timers'] : [];
+      return r['ok'] === true ? timers.join('; ') : str(r['note'], 'No timer');
+    }
     case 'set_timer':
       return r['ends_in'] ? `Timer running · ${str(r['ends_in'])}` : 'Timer running';
     case 'daily_brief': {

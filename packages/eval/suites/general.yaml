@@ -129,6 +129,32 @@ scenarios:
         - tool: remember
       max_turns: 4
 
+  - id: alarm-move
+    prompt: Actually make my 6:45 alarm 7:15 instead.
+    route: true
+    expect:
+      calls:
+        - tool: change_alarm
+          args: { new_time: { re: "07:15|7:15" } }
+      max_turns: 4
+
+  - id: timer-extend
+    prompt: Give the pasta timer another five minutes.
+    route: true
+    expect:
+      calls:
+        - tool: timer_control
+          args: { action: add_minutes }
+      max_turns: 4
+
+  - id: alarm-cancel-casual
+    prompt: I don't need to get up early tomorrow, kill the alarm.
+    route: true
+    expect:
+      calls:
+        - tool: cancel_alarm
+      max_turns: 4
+
   - id: memory-forget
     prompt: Forget what I told you about my locker code.
     route: true

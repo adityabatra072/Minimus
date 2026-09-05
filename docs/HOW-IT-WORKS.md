@@ -193,7 +193,11 @@ are time-sensitive notifications and the Clock screen says so. The store
 reconciles its list with the system every few seconds, so an alarm stopped
 from the lock screen shows as off in the app. The chat header carries a
 small pill with the soonest timer or next alarm; tapping it opens the Clock
-screen, which also has a stopwatch.
+screen, which also has a stopwatch. Removing, moving, renaming, pausing and
+extending go through tools too (`cancel_alarm`, `change_alarm`,
+`timer_control`, `list_alarms`); ambiguity ("several alarms match") comes
+back to the model as an error with the candidates listed, so it asks rather
+than guesses.
 
 ## 10. History and new chats
 

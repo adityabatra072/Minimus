@@ -21,6 +21,13 @@ alarms, timers (pause/resume, progress) and a stopwatch; a header pill shows
 the soonest timer or next alarm; a finished timer drops a line into the
 chat. "Wake me at 6:45" and "alarm at 7 every day" are reflexes.
 
+The agent controls the whole clock, not just creation: `list_alarms`,
+`cancel_alarm` (by time, label, or all), `change_alarm` (move, rename, make
+daily, switch on or off) and `timer_control` (pause, resume, cancel, add or
+take away minutes). "Cancel the timer", "pause my timer", "cancel my 6:45
+alarm" and "delete all my alarms" are reflexes. One alarm per clock time:
+setting the same time twice re-arms the existing one.
+
 ## Lower resistance
 
 - "Hey Siri, ask Minimus to …" and "Talk to Minimus" (App Intents / App

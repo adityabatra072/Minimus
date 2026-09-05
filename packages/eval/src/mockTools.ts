@@ -26,6 +26,10 @@ const CANNED: Record<string, unknown> = {
   calendar_create: { ok: true, event_id: 'evt_123' },
   set_alarm: { ok: true, alarm_id: 'alm_1' },
   set_timer: { ok: true, timer_id: 'tmr_1' },
+  list_alarms: { alarms: [{ time: '6:45 AM', enabled: true, repeats: 'once' }], timers: [{ label: 'pasta', remaining: '4:12', state: 'running' }] },
+  cancel_alarm: { ok: true, removed: ['6:45 AM'], remaining_alarms: 0 },
+  change_alarm: { ok: true, was: '6:45 AM', now: '7:00 AM', repeats: 'once', enabled: true },
+  timer_control: { ok: true, action: 'add_minutes', timers: ['pasta: now 9:12 left'] },
   daily_brief: {
     now: 'Monday 8:02 AM',
     calendar_today: [{ title: 'Standup', at: '09:30', ends: '09:45' }],
@@ -262,7 +266,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     kind: 'action',
     group: 'schedule',
     description:
-      'Set an alarm clock that rings at a time of day. It only rings — it cannot check or do anything.',
+      'Set a NEW alarm that rings at a time of day (a real alarm, like the Clock app). It only rings — it cannot check or do anything. To move or remove an existing alarm use change_alarm / cancel_alarm.',
     parameters: {
       type: 'object',
       properties: {
@@ -442,6 +446,65 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     },
     needsApproval: true,
     execute: record('make_call'),
+  });
+  registry.register({
+    name: 'list_alarms',
+    kind: 'query',
+    group: 'schedule',
+    description: 'Every alarm and running timer on the phone: times, labels, on/off, time left.',
+    parameters: { type: 'object', properties: {} },
+    execute: record('list_alarms'),
+  });
+  registry.register({
+    name: 'cancel_alarm',
+    kind: 'action',
+    group: 'schedule',
+    description: 'Remove an alarm (by its time, its label, or all of them). Use for "cancel / delete / turn off my alarm".',
+    parameters: {
+      type: 'object',
+      properties: {
+        time: { type: 'string', description: 'the alarm time, e.g. 06:45 or 7 pm' },
+        label: { type: 'string', description: 'the alarm label, if the user named it' },
+        all: { type: 'boolean', description: 'true to remove every alarm' },
+        disable_only: { type: 'boolean', description: 'true to switch it off but keep it in the list' },
+      },
+    },
+    execute: record('cancel_alarm'),
+  });
+  registry.register({
+    name: 'change_alarm',
+    kind: 'action',
+    group: 'schedule',
+    description: 'Move an existing alarm to a new time, rename it, make it daily or one-off, or switch it back on. Identify it by its current time or label.',
+    parameters: {
+      type: 'object',
+      properties: {
+        time: { type: 'string', description: 'current time of the alarm to change, e.g. 06:45 (omit when only one alarm exists)' },
+        label: { type: 'string', description: 'current label, if the user named it' },
+        new_time: { type: 'string', description: 'new time, 24h HH:MM' },
+        new_label: { type: 'string' },
+        repeat: { type: 'string', enum: ['once', 'daily'] },
+        enabled: { type: 'boolean', description: 'true to switch on, false to switch off' },
+      },
+    },
+    execute: record('change_alarm'),
+  });
+  registry.register({
+    name: 'timer_control',
+    kind: 'action',
+    group: 'schedule',
+    description: 'Pause, resume, cancel, or add/remove minutes on a running timer. With one timer running no label is needed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['pause', 'resume', 'cancel', 'add_minutes'] },
+        minutes: { type: 'number', description: 'for add_minutes: minutes to add (negative to take away)' },
+        label: { type: 'string', description: 'which timer, when several are running' },
+        all: { type: 'boolean', description: 'apply to every timer' },
+      },
+      required: ['action'],
+    },
+    execute: record('timer_control'),
   });
   registry.register({
     name: 'send_notification',
