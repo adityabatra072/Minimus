@@ -68,6 +68,7 @@ export async function runScenario(
 
   let finalText = '';
   let reason = 'unknown';
+  let runError = '';
   let turnsUsed = 0;
   const runConfig: Parameters<AgentLoop['run']>[1] = {
     adapter,
@@ -96,12 +97,13 @@ export async function runScenario(
     if (ev.type === 'run_finished') {
       finalText = ev.finalText;
       reason = ev.reason;
+      runError = 'error' in ev && typeof ev.error === 'string' ? ev.error : '';
     }
   }
 
   const failures: string[] = [];
   const exp = scenario.expect;
-  if (reason !== 'completed') failures.push(`run ended with reason=${reason}`);
+  if (reason !== 'completed') failures.push(`run ended with reason=${reason}${runError ? `: ${runError}` : ''}`);
   if (exp.no_calls && recorded.length > 0) {
     failures.push(`expected no tool calls, got ${recorded.map((r) => r.name).join(', ')}`);
   }

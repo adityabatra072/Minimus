@@ -285,7 +285,7 @@ export class AgentLoop {
           ...(policy.topK !== undefined ? { topK: policy.topK } : {}),
           ...(policy.repeatPenalty !== undefined ? { repeatPenalty: policy.repeatPenalty } : {}),
           ...(policy.thinking && thinkNext === 'open' && policy.thinkingBudgetTokens !== undefined
-            ? { thinkingBudgetTokens: policy.thinkingBudgetTokens }
+            ? { thinkingBudgetTokens: config.deliberate ? (policy.deliberateThinkingBudgetTokens ?? policy.thinkingBudgetTokens) : policy.thinkingBudgetTokens }
             : {}),
           thinkingMode: policy.thinking ? thinkNext : 'none',
           maxOutputTokens: policy.maxOutputTokens,

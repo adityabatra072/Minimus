@@ -27,6 +27,8 @@ export interface ModelPolicy {
   thinking: boolean;
   /** Cap on thinking tokens per turn (engines that can enforce it do). */
   thinkingBudgetTokens?: number;
+  /** Budget for runs composeRun marked `deliberate` (multi-step, deferred, teaching); defaults to thinkingBudgetTokens. */
+  deliberateThinkingBudgetTokens?: number;
   /**
    * 'always': open the think block on every turn (the model's own template).
    * 'adaptive': think only when the composition flagged the request as
@@ -91,9 +93,12 @@ export const DEFAULT_POLICIES: ModelPolicy[] = [
     topK: 50,
     repeatPenalty: 1.1,
     thinking: true,
-    // 384 rather than 512: on the phone every thinking token is heat, and the
-    // passing teach runs settled at ~300 tokens of deliberation.
+    // 384 rather than 512 for ordinary turns: on the phone every thinking
+    // token is heat, and passing single-tool runs settle at ~300 tokens.
+    // Deliberate runs (deferred work, teaching, multi-step) keep 512: at 384
+    // the rig's schedule-later scenario ran out of thinking before calling.
     thinkingBudgetTokens: 384,
+    deliberateThinkingBudgetTokens: 512,
     thinkingStrategy: 'adaptive',
     contextWindowTokens: 8192,
     maxOutputTokens: 768,

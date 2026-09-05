@@ -336,6 +336,7 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     group: 'schedule',
     kind: 'action',
     description: 'Add an item to the Reminders app, optionally due at a time (a to-do the user can tick off)',
+    usageHint: 'A to-do the PERSON ticks off later. It cannot check anything, compare values or notify on a condition — "check X and tell me if Y" is schedule_task, never create_reminder.',
     parameters: {
       type: 'object',
       properties: {

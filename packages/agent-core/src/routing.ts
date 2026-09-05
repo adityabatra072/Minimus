@@ -106,12 +106,19 @@ const DEFERRED_RE =
 export function deferredPreamble(prompt: string, now: Date = new Date()): string | null {
   if (!DEFERRED_RE.test(prompt)) return null;
   const clock = clockOffsetHint(prompt, now);
+  const conditional = CONDITIONAL_LATER_RE.test(prompt);
+  const offset = /\b(?:in|after) (\d+) minutes?\b/i.exec(prompt)?.[1] ?? (/\b(?:in|after) (\d+) hours?\b/i.exec(prompt) ? String(Number(/\b(?:in|after) (\d+) hours?\b/i.exec(prompt)![1]) * 60) : null);
+  const example = `[schedule_task{"instruction":"<what to do then>","when":"+${offset ?? 'N'}"}]`;
   return (
     'Part of this request happens LATER. Do the immediate part now with tools, ' +
     'then hand the later part to schedule_task (instruction = what to do, when = "+N" minutes from now) — ' +
     'schedule_task runs YOU again at that time to do it. Give `when` as a relative offset like "+3", ' +
     'never an absolute clock time: your own thinking takes minutes, so a timestamp you compute now is ' +
-    'already stale by the time the tool runs. After handing it off, give your short final answer.' +
+    'already stale by the time the tool runs. ' +
+    (conditional
+      ? 'This later part involves checking or deciding something, so it is ONLY schedule_task: create_reminder, set_timer and set_alarm cannot check anything and will be refused. '
+      : '') +
+    `The call looks like ${example}. After handing it off, give your short final answer.` +
     (clock ? ` ${clock}` : '')
   );
 }
@@ -166,8 +173,14 @@ export function clockOffsetHint(prompt: string, now: Date): string | null {
  * phrased with "for") unaffected.
  */
 export function deferredToolExclusions(prompt: string): string[] {
-  return DEFERRED_RE.test(prompt) ? ['set_timer', 'set_alarm'] : [];
+  if (!DEFERRED_RE.test(prompt)) return [];
+  // "in 30 minutes check my battery and notify me if…" is work for the agent,
+  // not a to-do for the person: a Reminders entry cannot check or compare.
+  // Plain "remind me in 30 minutes to call Mum" keeps create_reminder.
+  return CONDITIONAL_LATER_RE.test(prompt) ? ['set_timer', 'set_alarm', 'create_reminder'] : ['set_timer', 'set_alarm'];
 }
+
+const CONDITIONAL_LATER_RE = /\b(check|see if|whether|if (?:it|the|my|there)|compare|tell me if|notify me if|let me know if|report|look up|find out)\b/i;
 
 // "put it in", "book me", "add it to my calendar" — placing something ON the
 // calendar, which is calendar_create's job. schedule_task re-runs the AGENT
@@ -422,8 +435,13 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
   }
 
   const denyTools: Record<string, string> = {};
+  const laterOffset = /\b(?:in|after) (\d+) minutes?\b/i.exec(prompt)?.[1];
+  const laterExample = `Call it now, exactly like [schedule_task{"instruction":"<the later part, as an instruction to yourself>","when":"+${laterOffset ?? 'N'}"}].`;
   for (const t of deferredToolExclusions(prompt)) {
-    denyTools[t] = `${t} only rings a bell and cannot check or decide anything later. Hand the later part to schedule_task with when="+N".`;
+    denyTools[t] =
+      t === 'create_reminder'
+        ? `create_reminder is a to-do for the person; it cannot check, compare or notify. The later part is schedule_task. ${laterExample}`
+        : `${t} only rings a bell and cannot check or decide anything later. The later part is schedule_task. ${laterExample}`;
   }
   for (const t of calendarToolExclusions(prompt)) {
     denyTools[t] = 'Putting something ON THE CALENDAR is calendar_create, never schedule_task.';

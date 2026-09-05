@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeRun, extractTaughtPhrase, saidPhrase, clockOffsetHint } from '../src/routing.js';
+import { composeRun, deferredToolExclusions, extractTaughtPhrase, saidPhrase, clockOffsetHint } from '../src/routing.js';
 import { effectiveCategories, parseRouterOutput, routerGrammar } from '../src/router.js';
 
 describe('taught phrases', () => {
@@ -72,5 +72,11 @@ describe('clock offsets', () => {
     expect(clockOffsetHint('check again at 5', now)).toContain('+270');
     expect(clockOffsetHint('at 3pm remind me', now)).toContain('+150');
     expect(clockOffsetHint('no time here', now)).toBeNull();
+  });
+
+  it('keeps reminders for plain later requests but not for conditional ones', () => {
+    expect(deferredToolExclusions('remind me in 30 minutes to call Mum')).toEqual(['set_timer', 'set_alarm']);
+    expect(deferredToolExclusions("in 30 minutes, check my battery and notify me if it's below 50 percent")).toContain('create_reminder');
+    expect(deferredToolExclusions('set a timer for 10 minutes')).toEqual([]);
   });
 });
