@@ -37,4 +37,11 @@ describe('reflexes', () => {
     expect(matchReflex('set an alarm for 25:00', [], tools)).toBeNull();
     expect(matchReflex('set an alarm for tomorrow if it rains', [], tools)).toBeNull();
   });
+
+  it('starts timers from the short forms too', () => {
+    expect(matchReflex('timer for 3 minutes', [], tools)?.call).toMatchObject({ name: 'set_timer', arguments: { minutes: 3 } });
+    expect(matchReflex('start a 10 minute timer', [], tools)?.call).toMatchObject({ name: 'set_timer', arguments: { minutes: 10 } });
+    expect(matchReflex('set a timer for 12 min', [], tools)?.call).toMatchObject({ name: 'set_timer', arguments: { minutes: 12 } });
+    expect(matchReflex('timer for the pasta', [], tools)).toBeNull();
+  });
 });

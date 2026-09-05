@@ -39,15 +39,21 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
     re: /^(?:turn|switch|put) (?:the )?(?:flashlight|torch|flash light) (on|off)$|^(?:turn|switch) (on|off) (?:the |my )?(?:flashlight|torch|flash light)$|^(?:flashlight|torch) (on|off)$/,
     make: (m) => {
       const on = (m[1] ?? m[2] ?? m[3]) === 'on';
-      return { call: { id: id(), name: 'flashlight', arguments: { on } }, confirm: on ? 'Flashlight on.' : 'Flashlight off.' };
+      return {
+        call: { id: id(), name: 'flashlight', arguments: { on } },
+        confirm: on ? 'Flashlight on.' : 'Flashlight off.',
+      };
     },
   },
   {
-    re: /^(?:set|start) (?:a |the )?(?:timer|countdown) (?:for |of )?(\d{1,3}) ?(?:min|mins|minute|minutes)$|^(\d{1,3}) ?(?:min|mins|minute|minutes) timer$/,
+    re: /^(?:(?:set|start|put on) (?:a |the )?)?(?:timer|countdown) (?:for |of )?(\d{1,3}) ?(?:min|mins|minute|minutes)$|^(?:(?:set|start) (?:a |the )?)?(\d{1,3})[ -]?(?:min|mins|minute|minutes) timer$/,
     make: (m) => {
       const minutes = Number(m[1] ?? m[2]);
       if (!Number.isFinite(minutes) || minutes <= 0) return null;
-      return { call: { id: id(), name: 'set_timer', arguments: { minutes } }, confirm: `Timer set for ${minutes} minute${minutes === 1 ? '' : 's'}.` };
+      return {
+        call: { id: id(), name: 'set_timer', arguments: { minutes } },
+        confirm: `Timer set for ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      };
     },
   },
   {
@@ -66,7 +72,11 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
       shown.setHours(hour, minute, 0, 0);
       const label = shown.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       return {
-        call: { id: id(), name: 'set_alarm', arguments: daily ? { time, repeat: 'daily' } : { time } },
+        call: {
+          id: id(),
+          name: 'set_alarm',
+          arguments: daily ? { time, repeat: 'daily' } : { time },
+        },
         confirm: `Alarm set for ${label}${daily ? ', every day' : ''}.`,
       };
     },
@@ -75,7 +85,10 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
     re: /^(?:set|put|turn|change) (?:the )?(?:screen )?brightness (?:to |at )?(\d{1,3}) ?(?:%|percent)$/,
     make: (m) => {
       const pct = Math.max(0, Math.min(100, Number(m[1])));
-      return { call: { id: id(), name: 'set_brightness', arguments: { level: pct / 100 } }, confirm: `Brightness set to ${pct}%.` };
+      return {
+        call: { id: id(), name: 'set_brightness', arguments: { level: pct / 100 } },
+        confirm: `Brightness set to ${pct}%.`,
+      };
     },
   },
   {
@@ -92,12 +105,18 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
     re: /^(?:how much (?:storage|space)(?: do i have| is left| have i got)(?: left)?(?: on (?:this|my) phone)?|(?:free|available) (?:storage|space))$/,
     make: () => ({
       call: { id: id(), name: 'device_info', arguments: {} },
-      confirm: (r) => (typeof r['storage_free_gb'] === 'number' ? `${r['storage_free_gb']} GB free.` : 'Here is your device status.'),
+      confirm: (r) =>
+        typeof r['storage_free_gb'] === 'number'
+          ? `${r['storage_free_gb']} GB free.`
+          : 'Here is your device status.',
     }),
   },
   {
     re: /^(?:open|launch) (spotify|settings|camera|maps|youtube|whatsapp|chrome|safari|mail|photos)$/,
-    make: (m) => ({ call: { id: id(), name: 'open_app', arguments: { app: m[1] } }, confirm: `Opening ${m[1]}.` }),
+    make: (m) => ({
+      call: { id: id(), name: 'open_app', arguments: { app: m[1] } },
+      confirm: `Opening ${m[1]}.`,
+    }),
   },
 ];
 
@@ -105,14 +124,21 @@ const PATTERNS: { re: RegExp; make: (m: RegExpMatchArray) => Reflex | null }[] =
  * Match an utterance against the taught phrases and the fixed patterns.
  * Returns null whenever the request should go to the model.
  */
-export function matchReflex(utterance: string, macroNames: string[], availableTools: Set<string>): Reflex | null {
+export function matchReflex(
+  utterance: string,
+  macroNames: string[],
+  availableTools: Set<string>,
+): Reflex | null {
   const text = norm(utterance);
   if (!text) return null;
   // Taught phrase said on its own (with optional "run"/"do" in front).
   const phrase = text.replace(/^(?:run|do|execute|go) /, '');
   const macro = macroNames.find((m) => m.trim().toLowerCase() === phrase);
   if (macro && availableTools.has('run_macro')) {
-    return { call: { id: id(), name: 'run_macro', arguments: { name: macro } }, confirm: `Done — "${macro}".` };
+    return {
+      call: { id: id(), name: 'run_macro', arguments: { name: macro } },
+      confirm: `Done — "${macro}".`,
+    };
   }
   for (const { re, make } of PATTERNS) {
     const m = text.match(re);

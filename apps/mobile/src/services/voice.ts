@@ -20,24 +20,40 @@ import { diag } from './diag';
  * OpenAI-compatible cloud TTS endpoint when configured.
  */
 
-export type VoiceState = 'idle' | 'preparing' | 'listening' | 'transcribing' | 'speaking';
+export type VoiceState =
+  'idle' | 'preparing' | 'listening' | 'transcribing' | 'speaking';
 
 interface SpeechNative {
-  speechAuthorization(): Promise<{ speech: string; microphone: boolean; onDevice: boolean; available: boolean }>;
-  speechStart(contextualStrings: string[], onDevice: boolean, recordPath: string): Promise<void>;
+  speechAuthorization(): Promise<{
+    speech: string;
+    microphone: boolean;
+    onDevice: boolean;
+    available: boolean;
+  }>;
+  speechStart(
+    contextualStrings: string[],
+    onDevice: boolean,
+    recordPath: string,
+  ): Promise<void>;
   speechStop(): Promise<string>;
   speechCancel(): Promise<void>;
 }
 interface AlarmsNative {
   speakSystem(text: string, rate: number, voiceId: string): Promise<void>;
   stopSystemSpeech(): Promise<void>;
-  systemVoices(): Promise<{ id: string; name: string; language: string; quality: string }[]>;
+  systemVoices(): Promise<
+    { id: string; name: string; language: string; quality: string }[]
+  >;
   playAudioFile(path: string): Promise<void>;
   stopAudio(): Promise<void>;
 }
 
-const speech = (NativeModules as Record<string, SpeechNative | undefined>)['MinimusSpeech'];
-const alarms = (NativeModules as Record<string, AlarmsNative | undefined>)['MinimusAlarms'];
+const speech = (NativeModules as Record<string, SpeechNative | undefined>)[
+  'MinimusSpeech'
+];
+const alarms = (NativeModules as Record<string, AlarmsNative | undefined>)[
+  'MinimusAlarms'
+];
 
 export function voiceAvailable(): boolean {
   return !!speech && !!alarms;
@@ -68,15 +84,24 @@ export function voiceVocabulary(macroNames: string[]): string[] {
   ];
 }
 
-const WAKE_RE = /^\s*(hey |ok |okay )?(mini\s?mus|minimus|minimis|minimous|minimum)[,.!?\s]+/i;
+const WAKE_RE =
+  /^\s*(hey |ok |okay )?(mini\s?mus|minimus|minimis|minimous|minimum)[,.!?\s]+/i;
 
-export async function ensureVoiceReady(onProgress: (label: string) => void): Promise<void> {
-  if (!speech || !alarms) throw new Error('Voice is not available in this build.');
+export async function ensureVoiceReady(
+  onProgress: (label: string) => void,
+): Promise<void> {
+  if (!speech || !alarms)
+    throw new Error('Voice is not available in this build.');
   onProgress('preparing voice…');
   const auth = await speech.speechAuthorization();
-  if (auth.speech !== 'authorized') throw new Error('Speech recognition permission denied — enable it in Settings.');
-  if (!auth.microphone) throw new Error('Microphone permission denied — enable it in Settings.');
-  if (!auth.available) throw new Error('Speech recognition is not available right now.');
+  if (auth.speech !== 'authorized')
+    throw new Error(
+      'Speech recognition permission denied — enable it in Settings.',
+    );
+  if (!auth.microphone)
+    throw new Error('Microphone permission denied — enable it in Settings.');
+  if (!auth.available)
+    throw new Error('Speech recognition is not available right now.');
   onProgress('');
 }
 
@@ -85,9 +110,17 @@ export async function ensureVoiceReady(onProgress: (label: string) => void): Pro
  * dropped words, homophones. Runs on the router lane (its own cache), closed
  * thinking, a few dozen tokens. Returns the original on any doubt.
  */
-export async function correctTranscript(raw: string, macroNames: string[]): Promise<string> {
+export async function correctTranscript(
+  raw: string,
+  macroNames: string[],
+): Promise<string> {
   const text = raw.trim();
-  if (!text || !engine.isReady() || !useSettingsStore.getState().voice.llmCorrection) return text;
+  if (
+    !text ||
+    !engine.isReady() ||
+    !useSettingsStore.getState().voice.llmCorrection
+  )
+    return text;
   const vocab = voiceVocabulary(macroNames).slice(0, 30).join(', ');
   const prompt = renderChatMl(
     [
@@ -102,12 +135,27 @@ export async function correctTranscript(raw: string, macroNames: string[]): Prom
     { lfm: true, thinking: 'closed' },
   );
   try {
-    const r = await engine.classify(prompt, '', Math.min(80, Math.ceil(text.length / 2) + 16));
-    const fixed = r.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim().replace(/^["“]|["”]$/g, '');
+    const r = await engine.classify(
+      prompt,
+      '',
+      Math.min(80, Math.ceil(text.length / 2) + 16),
+    );
+    const fixed = r.text
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .trim()
+      .replace(/^["“]|["”]$/g, '');
     // A rewrite that doubles in length or shrinks to nothing is the model
     // talking, not correcting.
-    if (!fixed || fixed.length > text.length * 1.8 || fixed.length < text.length * 0.4) return text;
-    if (fixed !== text) diag(`voice corrected: ${JSON.stringify(text)} → ${JSON.stringify(fixed)}`);
+    if (
+      !fixed ||
+      fixed.length > text.length * 1.8 ||
+      fixed.length < text.length * 0.4
+    )
+      return text;
+    if (fixed !== text)
+      diag(
+        `voice corrected: ${JSON.stringify(text)} → ${JSON.stringify(fixed)}`,
+      );
     return fixed;
   } catch {
     return text;
@@ -155,28 +203,38 @@ export class VoicePipeline {
     this.lastPartial = '';
     this.partialAt = Date.now();
     this.active = true;
-    this.subs.forEach((s) => s.remove());
+    this.subs.forEach(s => s.remove());
     this.subs = [
-      this.emitter.addListener('MinimusSpeech', (ev: { text: string; isFinal: boolean }) => {
-        if (!this.active) return;
-        if (ev.text !== this.lastPartial) {
-          this.lastPartial = ev.text;
-          this.partialAt = Date.now();
-          this.callbacks.onPartial?.(ev.text);
-        }
-      }),
+      this.emitter.addListener(
+        'MinimusSpeech',
+        (ev: { text: string; isFinal: boolean }) => {
+          if (!this.active) return;
+          if (ev.text !== this.lastPartial) {
+            this.lastPartial = ev.text;
+            this.partialAt = Date.now();
+            this.callbacks.onPartial?.(ev.text);
+          }
+        },
+      ),
     ];
     const remote = useSettingsStore.getState().voice.remoteStt;
-    this.recordPath = remote.enabled ? `${RNFS.CachesDirectoryPath}/utterance.wav` : '';
+    this.recordPath = remote.enabled
+      ? `${RNFS.CachesDirectoryPath}/utterance.wav`
+      : '';
     this.callbacks.onState('listening');
-    await speech.speechStart(voiceVocabulary(this.macroNames), true, this.recordPath);
+    await speech.speechStart(
+      voiceVocabulary(this.macroNames),
+      true,
+      this.recordPath,
+    );
     if (!this.pushToTalk) {
       // Hands-free endpointing: the utterance is over when the transcript has
       // not changed for a moment after saying something.
       this.silenceTimer = setInterval(() => {
         const quiet = Date.now() - this.partialAt;
         if (this.lastPartial && quiet > 1400) void this.closeUtterance();
-        else if (!this.lastPartial && quiet > 12_000) void this.closeUtterance();
+        else if (!this.lastPartial && quiet > 12_000)
+          void this.closeUtterance();
       }, 250);
     }
   }
@@ -187,7 +245,9 @@ export class VoicePipeline {
     this.active = false;
     this.clearTimers();
     this.callbacks.onState('transcribing');
-    let text = (await speech.speechStop().catch(() => this.lastPartial)) || this.lastPartial;
+    let text =
+      (await speech.speechStop().catch(() => this.lastPartial)) ||
+      this.lastPartial;
     text = await this.maybeCloud(text);
     text = text.trim();
     if (text) text = await correctTranscript(text, this.macroNames);
@@ -206,7 +266,7 @@ export class VoicePipeline {
   private clearTimers(): void {
     if (this.silenceTimer) clearInterval(this.silenceTimer);
     this.silenceTimer = null;
-    this.subs.forEach((s) => s.remove());
+    this.subs.forEach(s => s.remove());
     this.subs = [];
   }
 
@@ -215,7 +275,9 @@ export class VoicePipeline {
     this.active = false;
     this.clearTimers();
     this.callbacks.onState('transcribing');
-    let text = (await speech.speechStop().catch(() => this.lastPartial)) || this.lastPartial;
+    let text =
+      (await speech.speechStop().catch(() => this.lastPartial)) ||
+      this.lastPartial;
     text = (await this.maybeCloud(text)).trim();
     if (this.requireWake) {
       if (!WAKE_RE.test(text)) {
@@ -239,26 +301,42 @@ export class VoicePipeline {
     try {
       if (!(await RNFS.exists(this.recordPath))) return local;
       const form = new FormData();
-      form.append('file', { uri: `file://${this.recordPath}`, name: 'utterance.wav', type: 'audio/wav' } as unknown as Blob);
+      form.append('file', {
+        uri: `file://${this.recordPath}`,
+        name: 'utterance.wav',
+        type: 'audio/wav',
+      } as unknown as Blob);
       form.append('model', cfg.model.trim() || 'whisper-1');
-      const res = await fetch(`${cfg.baseUrl.trim().replace(/\/$/, '')}/audio/transcriptions`, {
-        method: 'POST',
-        headers: cfg.apiKey.trim() ? { authorization: `Bearer ${cfg.apiKey.trim()}` } : {},
-        body: form,
-      });
+      const res = await fetch(
+        `${cfg.baseUrl.trim().replace(/\/$/, '')}/audio/transcriptions`,
+        {
+          method: 'POST',
+          headers: cfg.apiKey.trim()
+            ? { authorization: `Bearer ${cfg.apiKey.trim()}` }
+            : {},
+          body: form,
+        },
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { text?: string };
-      diag(`voice cloud stt: ${JSON.stringify((data.text ?? '').slice(0, 80))}`);
+      diag(
+        `voice cloud stt: ${JSON.stringify((data.text ?? '').slice(0, 80))}`,
+      );
       return data.text?.trim() || local;
     } catch (err) {
-      diag(`voice cloud stt failed: ${err instanceof Error ? err.message : String(err)}`);
+      diag(
+        `voice cloud stt failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       return local;
     }
   }
 
   /** Speak the agent's answer aloud; resolves when playout ends or is cut. */
   async speak(text: string): Promise<void> {
-    const clean = text.replace(/[*_`#>]/g, '').replace(/\[[^\]]*\]\([^)]*\)/g, '').slice(0, 700);
+    const clean = text
+      .replace(/[*_`#>]/g, '')
+      .replace(/\[[^\]]*\]\([^)]*\)/g, '')
+      .slice(0, 700);
     if (!clean.trim() || !alarms) return;
     this.callbacks.onState('speaking');
     const voice = useSettingsStore.getState().voice;
@@ -266,21 +344,43 @@ export class VoicePipeline {
       if (voice.remoteTts.enabled && voice.remoteTts.baseUrl.trim()) {
         await this.speakCloud(clean, voice.remoteTts);
       } else {
-        await alarms.speakSystem(clean, voice.rate, voice.systemVoiceId);
+        // No voice chosen yet: use the best-ranked one rather than whatever the
+        // synthesizer's list happens to start with.
+        const voiceId =
+          voice.systemVoiceId || (await listSystemVoices())[0]?.id || '';
+        await alarms.speakSystem(clean, voice.rate, voiceId);
       }
     } catch (err) {
-      diag(`voice tts error: ${err instanceof Error ? err.message : String(err)}`);
+      diag(
+        `voice tts error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       this.callbacks.onState('idle');
     }
   }
 
-  private async speakCloud(text: string, cfg: { baseUrl: string; apiKey: string; model: string; voice: string }): Promise<void> {
-    const res = await fetch(`${cfg.baseUrl.trim().replace(/\/$/, '')}/audio/speech`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(cfg.apiKey.trim() ? { authorization: `Bearer ${cfg.apiKey.trim()}` } : {}) },
-      body: JSON.stringify({ model: cfg.model.trim() || 'tts-1', voice: cfg.voice.trim() || 'alloy', input: text, response_format: 'mp3' }),
-    });
+  private async speakCloud(
+    text: string,
+    cfg: { baseUrl: string; apiKey: string; model: string; voice: string },
+  ): Promise<void> {
+    const res = await fetch(
+      `${cfg.baseUrl.trim().replace(/\/$/, '')}/audio/speech`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(cfg.apiKey.trim()
+            ? { authorization: `Bearer ${cfg.apiKey.trim()}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          model: cfg.model.trim() || 'tts-1',
+          voice: cfg.voice.trim() || 'alloy',
+          input: text,
+          response_format: 'mp3',
+        }),
+      },
+    );
     if (!res.ok) throw new Error(`cloud tts HTTP ${res.status}`);
     const buf = await res.arrayBuffer();
     const path = `${RNFS.CachesDirectoryPath}/tts.mp3`;
@@ -295,16 +395,65 @@ export class VoicePipeline {
   }
 }
 
-export async function listSystemVoices(): Promise<{ id: string; name: string; quality: string }[]> {
+/** Apple's novelty voices: fun, but nobody wants their assistant to be "Bubbles". */
+const NOVELTY_VOICES = new Set([
+  'albert',
+  'bad news',
+  'bahh',
+  'bells',
+  'boing',
+  'bubbles',
+  'cellos',
+  'good news',
+  'jester',
+  'organ',
+  'superstar',
+  'trinoids',
+  'whisper',
+  'wobble',
+  'zarvox',
+  'fred',
+  'junior',
+  'kathy',
+  'ralph',
+  'eddy',
+  'flo',
+  'grandma',
+  'grandpa',
+  'reed',
+  'rocko',
+  'sandy',
+  'shelley',
+]);
+
+/** Voices the user could pick, best first: premium/enhanced, then the familiar defaults (Samantha, Siri), novelty voices last. */
+export async function listSystemVoices(): Promise<
+  { id: string; name: string; quality: string }[]
+> {
   if (!alarms) return [];
   const voices = await alarms.systemVoices().catch(() => []);
-  const rank = { premium: 0, enhanced: 1, default: 2 } as Record<string, number>;
-  return voices.sort((a, b) => (rank[a.quality] ?? 3) - (rank[b.quality] ?? 3) || a.name.localeCompare(b.name));
+  const rank = { premium: 0, enhanced: 1, default: 2 } as Record<
+    string,
+    number
+  >;
+  const score = (v: { name: string; quality: string; language: string }) => {
+    const n = v.name.toLowerCase();
+    let s = (rank[v.quality] ?? 3) * 10;
+    if (NOVELTY_VOICES.has(n.replace(/\s*\(.*\)$/, ''))) s += 50;
+    if (/siri/.test(n)) s -= 5;
+    if (/samantha/.test(n)) s -= 3;
+    if (!/^en[-_]US/i.test(v.language)) s += 1;
+    return s;
+  };
+  return voices.sort(
+    (a, b) => score(a) - score(b) || a.name.localeCompare(b.name),
+  );
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const chars =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let out = '';
   for (let i = 0; i < bytes.length; i += 3) {
     const a = bytes[i]!;

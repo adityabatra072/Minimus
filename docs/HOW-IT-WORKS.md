@@ -148,6 +148,16 @@ when it names a tool the model was shown.
   `open_url` and `find_contact` round out the phone tools.
 - `describe_image` runs a separate small vision model on an attached photo.
 
+## 7b. Memory, and forgetting
+
+Facts live in a small store on the phone. Before the model runs, the message
+is matched against them and any hits ride into the context block, marked as
+the source of truth: if the chat above says something different (a fact
+since forgotten or changed), memory wins. `remember` is idempotent, `forget`
+removes the closest fact to a description, and `delete_macro` un-teaches a
+phrase. A memory question with no matching fact gets a line telling the
+model to say so rather than answer from earlier turns.
+
 ## 8. Hearing and speaking
 
 Voice does not use a downloaded model. Hearing is the phone's own speech

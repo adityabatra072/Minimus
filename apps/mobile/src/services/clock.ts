@@ -51,9 +51,24 @@ export interface Stopwatch {
 
 interface AlarmsNative {
   alarmAuthorization(): Promise<'authorized' | 'denied' | 'unavailable'>;
-  alarmSchedule(hour: number, minute: number, label: string, repeatsDaily: boolean): Promise<string>;
+  alarmSchedule(
+    hour: number,
+    minute: number,
+    label: string,
+    repeatsDaily: boolean,
+  ): Promise<string>;
   timerStart(seconds: number, label: string): Promise<string>;
-  alarmList(): Promise<{ id: string; state: string; kind: 'alarm' | 'timer'; fireAtMs?: number; hour?: number; minute?: number; durationSeconds?: number }[]>;
+  alarmList(): Promise<
+    {
+      id: string;
+      state: string;
+      kind: 'alarm' | 'timer';
+      fireAtMs?: number;
+      hour?: number;
+      minute?: number;
+      durationSeconds?: number;
+    }[]
+  >;
   alarmCancel(id: string): Promise<void>;
   alarmStop(id: string): Promise<void>;
   alarmPause(id: string): Promise<void>;
@@ -62,12 +77,21 @@ interface AlarmsNative {
 interface ToolsNative {
   setAlarm(hour: number, minute: number, label: string | null): Promise<void>;
   setTimer(seconds: number, label: string | null): Promise<void>;
-  notifyAt?(atMillis: number, title: string, body: string | null, identifier: string | null): Promise<string>;
+  notifyAt?(
+    atMillis: number,
+    title: string,
+    body: string | null,
+    identifier: string | null,
+  ): Promise<string>;
   cancelNotification?(identifier: string): Promise<void>;
 }
 
-const alarmKit = (NativeModules as Record<string, AlarmsNative | undefined>)['MinimusAlarms'];
-const tools = (NativeModules as Record<string, ToolsNative | undefined>)['MinimusTools'];
+const alarmKit = (NativeModules as Record<string, AlarmsNative | undefined>)[
+  'MinimusAlarms'
+];
+const tools = (NativeModules as Record<string, ToolsNative | undefined>)[
+  'MinimusTools'
+];
 
 const KEY = 'minimus.clock.v1';
 
@@ -77,7 +101,9 @@ let authState: 'authorized' | 'denied' | 'unavailable' | 'unknown' = 'unknown';
 export async function alarmKitAvailable(): Promise<boolean> {
   if (!alarmKit || Platform.OS !== 'ios') return false;
   if (authState === 'unknown') {
-    authState = await alarmKit.alarmAuthorization().catch(() => 'unavailable' as const);
+    authState = await alarmKit
+      .alarmAuthorization()
+      .catch(() => 'unavailable' as const);
     diag(`clock: AlarmKit ${authState}`);
   }
   return authState === 'authorized';
@@ -98,7 +124,9 @@ export function formatDuration(totalSeconds: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    : `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 export function timerRemainingSeconds(t: ClockTimer, now = Date.now()): number {
@@ -121,7 +149,12 @@ interface ClockState {
   stopwatch: Stopwatch;
   hydrated: boolean;
   hydrate: () => Promise<void>;
-  addAlarm: (hour: number, minute: number, label: string, repeatsDaily?: boolean) => Promise<ClockAlarm>;
+  addAlarm: (
+    hour: number,
+    minute: number,
+    label: string,
+    repeatsDaily?: boolean,
+  ) => Promise<ClockAlarm>;
   removeAlarm: (alarmId: string) => Promise<void>;
   toggleAlarm: (alarmId: string, enabled: boolean) => Promise<void>;
   startTimer: (seconds: number, label: string) => Promise<ClockTimer>;
@@ -137,7 +170,14 @@ interface ClockState {
 }
 
 function persist(state: Pick<ClockState, 'alarms' | 'timers' | 'stopwatch'>) {
-  AsyncStorage.setItem(KEY, JSON.stringify({ alarms: state.alarms, timers: state.timers, stopwatch: state.stopwatch })).catch(() => undefined);
+  AsyncStorage.setItem(
+    KEY,
+    JSON.stringify({
+      alarms: state.alarms,
+      timers: state.timers,
+      stopwatch: state.stopwatch,
+    }),
+  ).catch(() => undefined);
 }
 
 export const useClockStore = create<ClockState>((set, get) => ({
@@ -150,11 +190,13 @@ export const useClockStore = create<ClockState>((set, get) => ({
     try {
       const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
-        const saved = JSON.parse(raw) as Partial<Pick<ClockState, 'alarms' | 'timers' | 'stopwatch'>>;
+        const saved = JSON.parse(raw) as Partial<
+          Pick<ClockState, 'alarms' | 'timers' | 'stopwatch'>
+        >;
         set({
           alarms: saved.alarms ?? [],
           // A timer that was done when we quit does not need to come back.
-          timers: (saved.timers ?? []).filter((t) => t.state !== 'done'),
+          timers: (saved.timers ?? []).filter(t => t.state !== 'done'),
           stopwatch: saved.stopwatch ?? get().stopwatch,
         });
       }
@@ -169,7 +211,12 @@ export const useClockStore = create<ClockState>((set, get) => ({
     const useKit = await alarmKitAvailable();
     let nativeId = '';
     if (useKit && alarmKit) {
-      nativeId = await alarmKit.alarmSchedule(hour, minute, label, repeatsDaily);
+      nativeId = await alarmKit.alarmSchedule(
+        hour,
+        minute,
+        label,
+        repeatsDaily,
+      );
     } else {
       if (!tools) throw new Error('alarms are not available on this device');
       await tools.setAlarm(hour, minute, label || null);
@@ -185,33 +232,45 @@ export const useClockStore = create<ClockState>((set, get) => ({
       backend: useKit ? 'alarmkit' : 'notification',
       nativeId,
     };
-    const alarms = [...get().alarms, alarm].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+    const alarms = [...get().alarms, alarm].sort(
+      (a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute),
+    );
     set({ alarms });
     persist({ ...get(), alarms });
     diag(`clock: alarm ${formatClock(hour, minute)} via ${alarm.backend}`);
     return alarm;
   },
 
-  removeAlarm: async (alarmId) => {
-    const alarm = get().alarms.find((a) => a.id === alarmId);
+  removeAlarm: async alarmId => {
+    const alarm = get().alarms.find(a => a.id === alarmId);
     if (!alarm) return;
-    if (alarm.backend === 'alarmkit' && alarm.nativeId) await alarmKit?.alarmCancel(alarm.nativeId).catch(() => undefined);
-    const alarms = get().alarms.filter((a) => a.id !== alarmId);
+    if (alarm.backend === 'alarmkit' && alarm.nativeId)
+      await alarmKit?.alarmCancel(alarm.nativeId).catch(() => undefined);
+    const alarms = get().alarms.filter(a => a.id !== alarmId);
     set({ alarms });
     persist({ ...get(), alarms });
   },
 
   toggleAlarm: async (alarmId, enabled) => {
-    const alarm = get().alarms.find((a) => a.id === alarmId);
+    const alarm = get().alarms.find(a => a.id === alarmId);
     if (!alarm || alarm.enabled === enabled) return;
     let nativeId = alarm.nativeId;
     if (alarm.backend === 'alarmkit' && alarmKit) {
-      if (enabled) nativeId = await alarmKit.alarmSchedule(alarm.hour, alarm.minute, alarm.label, alarm.repeatsDaily);
-      else if (nativeId) await alarmKit.alarmCancel(nativeId).catch(() => undefined);
+      if (enabled)
+        nativeId = await alarmKit.alarmSchedule(
+          alarm.hour,
+          alarm.minute,
+          alarm.label,
+          alarm.repeatsDaily,
+        );
+      else if (nativeId)
+        await alarmKit.alarmCancel(nativeId).catch(() => undefined);
     } else if (enabled && tools) {
       await tools.setAlarm(alarm.hour, alarm.minute, alarm.label || null);
     }
-    const alarms = get().alarms.map((a) => (a.id === alarmId ? { ...a, enabled, nativeId } : a));
+    const alarms = get().alarms.map(a =>
+      a.id === alarmId ? { ...a, enabled, nativeId } : a,
+    );
     set({ alarms });
     persist({ ...get(), alarms });
   },
@@ -234,68 +293,112 @@ export const useClockStore = create<ClockState>((set, get) => ({
       backend: useKit ? 'alarmkit' : 'notification',
       nativeId,
     };
-    const timers = [...get().timers.filter((t) => t.state !== 'done'), timer];
+    const timers = [...get().timers.filter(t => t.state !== 'done'), timer];
     set({ timers });
     persist({ ...get(), timers });
     diag(`clock: timer ${formatDuration(seconds)} via ${timer.backend}`);
     return timer;
   },
 
-  pauseTimer: async (timerId) => {
-    const t = get().timers.find((x) => x.id === timerId);
+  pauseTimer: async timerId => {
+    const t = get().timers.find(x => x.id === timerId);
     if (!t || t.state !== 'running') return;
-    if (t.backend === 'alarmkit') await alarmKit?.alarmPause(t.nativeId).catch(() => undefined);
-    const timers = get().timers.map((x) => (x.id === timerId ? { ...x, state: 'paused' as const, pausedRemaining: timerRemainingSeconds(x) } : x));
-    set({ timers });
-    persist({ ...get(), timers });
-  },
-
-  resumeTimer: async (timerId) => {
-    const t = get().timers.find((x) => x.id === timerId);
-    if (!t || t.state !== 'paused') return;
-    if (t.backend === 'alarmkit') await alarmKit?.alarmResume(t.nativeId).catch(() => undefined);
-    const remaining = t.pausedRemaining ?? 0;
-    const timers = get().timers.map((x) =>
-      x.id === timerId ? { ...x, state: 'running' as const, pausedRemaining: undefined, durationSeconds: remaining, startedAtMs: Date.now() } : x,
+    if (t.backend === 'alarmkit')
+      await alarmKit?.alarmPause(t.nativeId).catch(() => undefined);
+    const timers = get().timers.map(x =>
+      x.id === timerId
+        ? {
+            ...x,
+            state: 'paused' as const,
+            pausedRemaining: timerRemainingSeconds(x),
+          }
+        : x,
     );
     set({ timers });
     persist({ ...get(), timers });
   },
 
-  cancelTimer: async (timerId) => {
-    const t = get().timers.find((x) => x.id === timerId);
+  resumeTimer: async timerId => {
+    const t = get().timers.find(x => x.id === timerId);
+    if (!t || t.state !== 'paused') return;
+    if (t.backend === 'alarmkit')
+      await alarmKit?.alarmResume(t.nativeId).catch(() => undefined);
+    const remaining = t.pausedRemaining ?? 0;
+    const timers = get().timers.map(x =>
+      x.id === timerId
+        ? {
+            ...x,
+            state: 'running' as const,
+            pausedRemaining: undefined,
+            durationSeconds: remaining,
+            startedAtMs: Date.now(),
+          }
+        : x,
+    );
+    set({ timers });
+    persist({ ...get(), timers });
+  },
+
+  cancelTimer: async timerId => {
+    const t = get().timers.find(x => x.id === timerId);
     if (!t) return;
     if (t.backend === 'alarmkit' && t.nativeId) {
       await alarmKit?.alarmStop(t.nativeId).catch(() => undefined);
       await alarmKit?.alarmCancel(t.nativeId).catch(() => undefined);
     }
-    const timers = get().timers.filter((x) => x.id !== timerId);
+    const timers = get().timers.filter(x => x.id !== timerId);
     set({ timers });
     persist({ ...get(), timers });
   },
 
   sync: async () => {
     const now = Date.now();
-    let timers = get().timers.map((t) => (t.state === 'running' && timerRemainingSeconds(t, now) <= 0 ? { ...t, state: 'done' as const } : t));
+    let timers = get().timers.map(t =>
+      t.state === 'running' && timerRemainingSeconds(t, now) <= 0
+        ? { ...t, state: 'done' as const }
+        : t,
+    );
     let alarms = get().alarms;
     if (await alarmKitAvailable()) {
       const live = await alarmKit!.alarmList().catch(() => null);
       if (live) {
-        const liveIds = new Set(live.map((l) => l.id));
+        const liveIds = new Set(live.map(l => l.id));
         // A one-shot alarm the user stopped from the lock screen is gone from
         // AlarmKit; show it switched off rather than pretending it will ring.
-        alarms = alarms.map((a) => (a.backend === 'alarmkit' && a.enabled && !a.repeatsDaily && a.nativeId && !liveIds.has(a.nativeId) ? { ...a, enabled: false } : a));
-        timers = timers.map((t) => {
+        alarms = alarms.map(a =>
+          a.backend === 'alarmkit' &&
+          a.enabled &&
+          !a.repeatsDaily &&
+          a.nativeId &&
+          !liveIds.has(a.nativeId)
+            ? { ...a, enabled: false }
+            : a,
+        );
+        timers = timers.map(t => {
           if (t.backend !== 'alarmkit' || t.state === 'done') return t;
-          const l = live.find((x) => x.id === t.nativeId);
+          const l = live.find(x => x.id === t.nativeId);
           if (!l) return { ...t, state: 'done' as const };
-          if (l.state === 'paused' && t.state === 'running') return { ...t, state: 'paused' as const, pausedRemaining: timerRemainingSeconds(t, now) };
-          if (l.state === 'countdown' && t.state === 'paused') return { ...t, state: 'running' as const, pausedRemaining: undefined, durationSeconds: t.pausedRemaining ?? 0, startedAtMs: now };
+          if (l.state === 'paused' && t.state === 'running')
+            return {
+              ...t,
+              state: 'paused' as const,
+              pausedRemaining: timerRemainingSeconds(t, now),
+            };
+          if (l.state === 'countdown' && t.state === 'paused')
+            return {
+              ...t,
+              state: 'running' as const,
+              pausedRemaining: undefined,
+              durationSeconds: t.pausedRemaining ?? 0,
+              startedAtMs: now,
+            };
           return t;
         });
       }
     }
-    const changed = JSON.stringify(timers) !== JSON.stringify(get().timers) || JSON.stringify(alarms) !== JSON.stringify(get().alarms);
+    const changed =
+      JSON.stringify(timers) !== JSON.stringify(get().timers) ||
+      JSON.stringify(alarms) !== JSON.stringify(get().alarms);
     if (changed) {
       set({ timers, alarms });
       persist({ ...get(), timers, alarms });
@@ -312,19 +415,30 @@ export const useClockStore = create<ClockState>((set, get) => ({
   stopwatchStop: () => {
     const sw = get().stopwatch;
     if (!sw.running) return;
-    const stopwatch = { ...sw, running: false, accumulatedMs: sw.accumulatedMs + (Date.now() - sw.segmentStartMs), segmentStartMs: 0 };
+    const stopwatch = {
+      ...sw,
+      running: false,
+      accumulatedMs: sw.accumulatedMs + (Date.now() - sw.segmentStartMs),
+      segmentStartMs: 0,
+    };
     set({ stopwatch });
     persist({ ...get(), stopwatch });
   },
   stopwatchLap: () => {
     const sw = get().stopwatch;
-    const elapsed = sw.accumulatedMs + (sw.running ? Date.now() - sw.segmentStartMs : 0);
+    const elapsed =
+      sw.accumulatedMs + (sw.running ? Date.now() - sw.segmentStartMs : 0);
     const stopwatch = { ...sw, laps: [...sw.laps, elapsed] };
     set({ stopwatch });
     persist({ ...get(), stopwatch });
   },
   stopwatchReset: () => {
-    const stopwatch = { running: false, accumulatedMs: 0, segmentStartMs: 0, laps: [] };
+    const stopwatch = {
+      running: false,
+      accumulatedMs: 0,
+      segmentStartMs: 0,
+      laps: [],
+    };
     set({ stopwatch });
     persist({ ...get(), stopwatch });
   },
@@ -343,17 +457,34 @@ export function formatStopwatch(ms: number): string {
 }
 
 /** What the chat header should show: the soonest running timer, else the next alarm. */
-export function clockHeadline(state: Pick<ClockState, 'alarms' | 'timers'>, now = Date.now()): { kind: 'timer' | 'alarm'; text: string; id: string } | null {
-  const running = state.timers.filter((t) => t.state === 'running' || t.state === 'paused');
+export function clockHeadline(
+  state: Pick<ClockState, 'alarms' | 'timers'>,
+  now = Date.now(),
+): { kind: 'timer' | 'alarm'; text: string; id: string } | null {
+  const running = state.timers.filter(
+    t => t.state === 'running' || t.state === 'paused',
+  );
   if (running.length > 0) {
-    const soonest = running.reduce((a, b) => (timerRemainingSeconds(a, now) <= timerRemainingSeconds(b, now) ? a : b));
+    const soonest = running.reduce((a, b) =>
+      timerRemainingSeconds(a, now) <= timerRemainingSeconds(b, now) ? a : b,
+    );
     const rest = running.length > 1 ? ` +${running.length - 1}` : '';
-    return { kind: 'timer', id: soonest.id, text: `${formatDuration(timerRemainingSeconds(soonest, now))}${soonest.state === 'paused' ? ' paused' : ''}${rest}` };
+    return {
+      kind: 'timer',
+      id: soonest.id,
+      text: `${formatDuration(timerRemainingSeconds(soonest, now))}${soonest.state === 'paused' ? ' paused' : ''}${rest}`,
+    };
   }
-  const enabled = state.alarms.filter((a) => a.enabled);
+  const enabled = state.alarms.filter(a => a.enabled);
   if (enabled.length > 0) {
-    const next = enabled.reduce((a, b) => (nextAlarmFire(a) <= nextAlarmFire(b) ? a : b));
-    return { kind: 'alarm', id: next.id, text: formatClock(next.hour, next.minute) };
+    const next = enabled.reduce((a, b) =>
+      nextAlarmFire(a) <= nextAlarmFire(b) ? a : b,
+    );
+    return {
+      kind: 'alarm',
+      id: next.id,
+      text: formatClock(next.hour, next.minute),
+    };
   }
   return null;
 }

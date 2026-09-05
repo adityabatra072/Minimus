@@ -674,9 +674,11 @@ export class AgentLoop {
       }
       if (streakCount >= 2 && !streakNudged) {
         streakNudged = true;
+        // A system note, not a user turn: as a user message the 2.6B model
+        // echoed it back ("you're now asking me to answer directly…").
         messages.push({
-          role: 'user',
-          content: `You have called ${streakTool} ${streakCount} times. The results above are sufficient — do not call it again. Answer the user now.`,
+          role: 'system',
+          content: `${streakTool} has now run ${streakCount} times and its results are above; it will not be needed again. Reply to the user in one or two sentences.`,
         });
       }
       // Rig evidence: a search that returns nothing useful gets called five

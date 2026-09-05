@@ -26,7 +26,14 @@ const CANNED: Record<string, unknown> = {
   calendar_create: { ok: true, event_id: 'evt_123' },
   set_alarm: { ok: true, alarm_id: 'alm_1' },
   set_timer: { ok: true, timer_id: 'tmr_1' },
-  daily_brief: { now: 'Monday 8:02 AM', calendar_today: [{ title: 'Standup', at: '09:30', ends: '09:45' }], reminders_due: [{ title: 'Call dentist' }], alarms: [], timers: [], scheduled_tasks: [] },
+  daily_brief: {
+    now: 'Monday 8:02 AM',
+    calendar_today: [{ title: 'Standup', at: '09:30', ends: '09:45' }],
+    reminders_due: [{ title: 'Call dentist' }],
+    alarms: [],
+    timers: [],
+    scheduled_tasks: [],
+  },
   schedule_task: { ok: true, task_id: 'tsk_1' },
   play_music: { ok: true, now_playing: true },
   send_email: { ok: true, status: 'composer_opened' },
@@ -34,12 +41,17 @@ const CANNED: Record<string, unknown> = {
   make_call: { ok: true, status: 'dialing' },
   clipboard_write: { ok: true },
   send_notification: { ok: true },
-  find_contact: { matches: [{ name: 'Sam Rivera', phones: ['+1 555 0100 (mobile)'], emails: ['sam@example.com'] }] },
+  find_contact: {
+    matches: [
+      { name: 'Sam Rivera', phones: ['+1 555 0100 (mobile)'], emails: ['sam@example.com'] },
+    ],
+  },
   open_url: { ok: true, opened: 'https://example.com' },
   clipboard_read: { text: 'Trattoria da Enzo, via dei Vascellari 29', empty: false },
   create_reminder: { ok: true, reminder: 'charge phone', due: '21:00' },
   run_js: { output: '42' },
   remember: { ok: true, remembered: true },
+  forget: { ok: true, forgot: ['locker code is 4417'], remaining: 2 },
   recall: {
     matches: [
       { fact: 'Sarah recommended Trattoria da Enzo in Rome', saved: '2026-08-12' },
@@ -166,7 +178,9 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     description: 'Open another app on the phone by name',
     parameters: {
       type: 'object',
-      properties: { app: { type: 'string', description: 'app name, e.g. "spotify", "settings", "camera"' } },
+      properties: {
+        app: { type: 'string', description: 'app name, e.g. "spotify", "settings", "camera"' },
+      },
       required: ['app'],
     },
     execute: record('open_app'),
@@ -229,11 +243,15 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'calendar_query',
     group: 'schedule',
-    description: 'Look at the calendar for a day: returns the events and the free gaps between them',
+    description:
+      'Look at the calendar for a day: returns the events and the free gaps between them',
     parameters: {
       type: 'object',
       properties: {
-        date: { type: 'string', description: '"today", "tomorrow", or an ISO date like 2026-08-13' },
+        date: {
+          type: 'string',
+          description: '"today", "tomorrow", or an ISO date like 2026-08-13',
+        },
       },
       required: ['date'],
     },
@@ -250,7 +268,11 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
       properties: {
         time: { type: 'string', description: '24h HH:MM, e.g. 07:30' },
         label: { type: 'string' },
-        repeat: { type: 'string', enum: ['once', 'daily'], description: 'daily when the user says every day / weekdays / each morning' },
+        repeat: {
+          type: 'string',
+          enum: ['once', 'daily'],
+          description: 'daily when the user says every day / weekdays / each morning',
+        },
       },
       required: ['time'],
     },
@@ -285,7 +307,11 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
       properties: {
         instruction: { type: 'string', description: 'what to do when the time comes' },
         when: { type: 'string', description: 'ISO 8601 datetime or +N minutes, e.g. "+30"' },
-        repeat: { type: 'string', enum: ['once', 'daily'], description: 'daily when the user wants this every day at that time' },
+        repeat: {
+          type: 'string',
+          enum: ['once', 'daily'],
+          description: 'daily when the user wants this every day at that time',
+        },
       },
       required: ['instruction', 'when'],
     },
@@ -301,7 +327,10 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'song/artist/playlist to play, e.g. "Night Mode by Drake"' },
+        query: {
+          type: 'string',
+          description: 'song/artist/playlist to play, e.g. "Night Mode by Drake"',
+        },
       },
       required: ['query'],
     },
@@ -312,8 +341,13 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
   registry.register({
     name: 'find_contact',
     group: 'comms',
-    description: 'Look up a person in the phone contacts by name; returns their phone numbers and emails',
-    parameters: { type: 'object', properties: { name: { type: 'string', description: 'first name, full name or nickname' } }, required: ['name'] },
+    description:
+      'Look up a person in the phone contacts by name; returns their phone numbers and emails',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'first name, full name or nickname' } },
+      required: ['name'],
+    },
     execute: record('find_contact'),
   });
   registry.register({
@@ -321,7 +355,16 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     group: 'device',
     kind: 'action',
     description: 'Open a web address in the browser, or a maps search like "maps:coffee near me"',
-    parameters: { type: 'object', properties: { url: { type: 'string', description: 'https://… link, or "maps:<place or query>" to open Maps' } }, required: ['url'] },
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'https://… link, or "maps:<place or query>" to open Maps',
+        },
+      },
+      required: ['url'],
+    },
     execute: record('open_url'),
   });
   registry.register({
@@ -335,13 +378,19 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     name: 'create_reminder',
     group: 'schedule',
     kind: 'action',
-    description: 'Add an item to the Reminders app, optionally due at a time (a to-do the user can tick off)',
-    usageHint: 'A to-do the PERSON ticks off later. It cannot check anything, compare values or notify on a condition — "check X and tell me if Y" is schedule_task, never create_reminder.',
+    description:
+      'Add an item to the Reminders app, optionally due at a time (a to-do the user can tick off)',
+    usageHint:
+      'A to-do the PERSON ticks off later. It cannot check anything, compare values or notify on a condition — "check X and tell me if Y" is schedule_task, never create_reminder.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string' },
-        when: { type: 'string', description: 'optional: "+N" minutes from now, "HH:MM", "tomorrow HH:MM", or an ISO datetime' },
+        when: {
+          type: 'string',
+          description:
+            'optional: "+N" minutes from now, "HH:MM", "tomorrow HH:MM", or an ISO datetime',
+        },
         notes: { type: 'string' },
       },
       required: ['title'],
@@ -418,27 +467,55 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     description: 'Run a short JavaScript snippet in a sandbox and return what it prints',
     parameters: {
       type: 'object',
-      properties: { code: { type: 'string', description: 'JavaScript source; use console.log for output' } },
+      properties: {
+        code: { type: 'string', description: 'JavaScript source; use console.log for output' },
+      },
       required: ['code'],
     },
     execute: record('run_js'),
   });
-
 
   // ---- memory (on-device personal context) ----
   registry.register({
     name: 'remember',
     kind: 'action',
     group: 'memory',
-    description: 'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
+    description:
+      'Save a fact to on-device memory so it can be recalled later (stays on this phone)',
     usageHint:
       'remember stores INFORMATION to answer questions later. If the user is instead describing a phrase that should PERFORM actions ("when I say X, do Y and Z", "new rule: …"), that is define_macro, not remember.',
     parameters: {
       type: 'object',
-      properties: { fact: { type: 'string', description: 'the fact to remember, phrased plainly' } },
+      properties: {
+        fact: { type: 'string', description: 'the fact to remember, phrased plainly' },
+      },
       required: ['fact'],
     },
     execute: record('remember'),
+  });
+  registry.register({
+    name: 'forget',
+    kind: 'action',
+    group: 'memory',
+    description:
+      'Delete a saved fact from on-device memory (the opposite of remember). Matching is fuzzy: describe the fact and the closest saved ones are removed.',
+    usageHint:
+      'Use forget when the user says forget / delete / remove / erase something they told you earlier ("forget my locker code", "delete what I said about Sarah"). Pass a short description of the fact, not the whole sentence. If the user wants to forget a taught PHRASE, that is delete_macro, not forget.',
+    parameters: {
+      type: 'object',
+      properties: {
+        about: {
+          type: 'string',
+          description: 'what the fact is about, e.g. "locker code" or "Sarah restaurant"',
+        },
+        all: {
+          type: 'boolean',
+          description: 'true only when the user explicitly asks to wipe every memory',
+        },
+      },
+      required: ['about'],
+    },
+    execute: record('forget'),
   });
   registry.register({
     name: 'recall',
@@ -478,6 +555,23 @@ export function buildMockTools(overrides: Record<string, unknown> = {}): MockToo
     execute: record('define_macro'),
   });
   registry.register({
+    name: 'delete_macro',
+    kind: 'action',
+    group: 'macro',
+    description:
+      'Forget a taught phrase so saying it no longer does anything (the opposite of define_macro).',
+    usageHint:
+      'Use when the user asks to forget, delete or remove a PHRASE they taught ("forget the wind down rule"). Forgetting a saved FACT is forget, not delete_macro.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'the phrase, as taught, e.g. "wind down"' },
+      },
+      required: ['name'],
+    },
+    execute: record('delete_macro'),
+  });
+  registry.register({
     name: 'run_macro',
     kind: 'action',
     group: 'macro',
@@ -502,10 +596,20 @@ export function matchesExpectedArgs(
   if (!expected) return true;
   for (const [key, want] of Object.entries(expected)) {
     const got = actual[key];
-    if (want !== null && typeof want === 'object' && !Array.isArray(want) && 'min_items' in (want as object)) {
+    if (
+      want !== null &&
+      typeof want === 'object' &&
+      !Array.isArray(want) &&
+      'min_items' in (want as object)
+    ) {
       const min = Number((want as { min_items: unknown }).min_items);
       if (!Array.isArray(got) || got.length < min) return false;
-    } else if (want !== null && typeof want === 'object' && !Array.isArray(want) && 're' in (want as object)) {
+    } else if (
+      want !== null &&
+      typeof want === 'object' &&
+      !Array.isArray(want) &&
+      're' in (want as object)
+    ) {
       const re = new RegExp(String((want as { re: unknown }).re), 'i');
       if (!re.test(String(got ?? ''))) return false;
     } else if (Array.isArray(want)) {

@@ -129,6 +129,24 @@ scenarios:
         - tool: remember
       max_turns: 4
 
+  - id: memory-forget
+    prompt: Forget what I told you about my locker code.
+    route: true
+    expect:
+      calls:
+        - tool: forget
+          args: { about: { re: "locker" } }
+      max_turns: 4
+
+  - id: memory-forget-casual
+    prompt: You can delete the thing about Sarah's restaurant, I don't need it anymore.
+    route: true
+    expect:
+      calls:
+        - tool: forget
+          args: { about: { re: "sarah|restaurant" } }
+      max_turns: 4
+
   # --- must NOT reach for a tool ---
   - id: plain-question
     prompt: What is the capital of France?

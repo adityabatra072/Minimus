@@ -29,9 +29,17 @@ chat. "Wake me at 6:45" and "alarm at 7 every day" are reflexes.
   Focus automations.
 - Push-to-talk shows live words in the composer while you speak.
 
+## Memory has a delete path
+
+`forget` removes a saved fact by description ("forget my locker code"),
+`delete_macro` un-teaches a phrase. Injected memory facts are now marked as
+the source of truth over earlier chat turns, so a forgotten fact does not
+come back from conversation history, and `remember` is idempotent.
+
 ## Something to come back for
 
-- Morning brief: pick a time in Settings and a recurring scheduled task
+- Onboarding ends with one question: want a morning brief, and when.
+- Morning brief: pick a time in Settings (or at onboarding) and a recurring scheduled task
   gathers calendar, reminders, alarms and scheduled tasks (`daily_brief`)
   and tells you about your day in your own context.
 - `schedule_task` can repeat daily.

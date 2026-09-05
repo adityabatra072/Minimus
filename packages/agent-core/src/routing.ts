@@ -63,9 +63,17 @@ const DEFAULT_GROUPS = ['device', 'schedule', 'music'];
  * after teaching anything ran the macro (device evidence from user testing).
  */
 export function saidPhrase(prompt: string, macroNames: string[]): string | null {
-  const lower = ` ${prompt.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  const lower = ` ${prompt
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()} `;
   for (const name of macroNames) {
-    const n = name.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const n = name
+      .toLowerCase()
+      .replace(/[^a-z0-9' ]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (n && lower.includes(` ${n} `)) return name;
   }
   return null;
@@ -107,7 +115,11 @@ export function deferredPreamble(prompt: string, now: Date = new Date()): string
   if (!DEFERRED_RE.test(prompt)) return null;
   const clock = clockOffsetHint(prompt, now);
   const conditional = CONDITIONAL_LATER_RE.test(prompt);
-  const offset = /\b(?:in|after) (\d+) minutes?\b/i.exec(prompt)?.[1] ?? (/\b(?:in|after) (\d+) hours?\b/i.exec(prompt) ? String(Number(/\b(?:in|after) (\d+) hours?\b/i.exec(prompt)![1]) * 60) : null);
+  const offset =
+    /\b(?:in|after) (\d+) minutes?\b/i.exec(prompt)?.[1] ??
+    (/\b(?:in|after) (\d+) hours?\b/i.exec(prompt)
+      ? String(Number(/\b(?:in|after) (\d+) hours?\b/i.exec(prompt)![1]) * 60)
+      : null);
   const example = `[schedule_task{"instruction":"<what to do then>","when":"+${offset ?? 'N'}"}]`;
   return (
     'Part of this request happens LATER. Do the immediate part now with tools, ' +
@@ -177,10 +189,13 @@ export function deferredToolExclusions(prompt: string): string[] {
   // "in 30 minutes check my battery and notify me if…" is work for the agent,
   // not a to-do for the person: a Reminders entry cannot check or compare.
   // Plain "remind me in 30 minutes to call Mum" keeps create_reminder.
-  return CONDITIONAL_LATER_RE.test(prompt) ? ['set_timer', 'set_alarm', 'create_reminder'] : ['set_timer', 'set_alarm'];
+  return CONDITIONAL_LATER_RE.test(prompt)
+    ? ['set_timer', 'set_alarm', 'create_reminder']
+    : ['set_timer', 'set_alarm'];
 }
 
-const CONDITIONAL_LATER_RE = /\b(check|see if|whether|if (?:it|the|my|there)|compare|tell me if|notify me if|let me know if|report|look up|find out)\b/i;
+const CONDITIONAL_LATER_RE =
+  /\b(check|see if|whether|if (?:it|the|my|there)|compare|tell me if|notify me if|let me know if|report|look up|find out)\b/i;
 
 // "put it in", "book me", "add it to my calendar" — placing something ON the
 // calendar, which is calendar_create's job. schedule_task re-runs the AGENT
@@ -251,7 +266,10 @@ export function teachingPreamble(prompt: string): string | null {
 export function extractTaughtPhrase(prompt: string): string | null {
   const quoted = /(?:say|ask for|tell you|called|named)\s+["“']([^"”']{2,40})["”']/i.exec(prompt);
   if (quoted) return quoted[1]!.trim().toLowerCase();
-  const bare = /(?:when(?:ever)? i (?:say|ask for|tell you)|if i (?:ever )?(?:say|ask for|tell you)|(?:shortcut|macro|routine|command|phrase) (?:called|named|for))\s+([a-z][a-z0-9' -]{1,30}?)(?=\s*[,:;.]|\s+(?:that|which|then|to|and)\b|$)/i.exec(prompt);
+  const bare =
+    /(?:when(?:ever)? i (?:say|ask for|tell you)|if i (?:ever )?(?:say|ask for|tell you)|(?:shortcut|macro|routine|command|phrase) (?:called|named|for))\s+([a-z][a-z0-9' -]{1,30}?)(?=\s*[,:;.]|\s+(?:that|which|then|to|and)\b|$)/i.exec(
+      prompt,
+    );
   return bare ? bare[1]!.trim().toLowerCase() : null;
 }
 
@@ -270,7 +288,8 @@ export function isTeaching(prompt: string): boolean {
   return TEACHING_RE.test(prompt) && !QUESTION_RE.test(prompt);
 }
 
-const QUESTION_RE = /\?\s*$|^\s*(what|which|how|where|who|why|did|do|does|can|could|would|is|are|tell me|remind me what|explain)\b/i;
+const QUESTION_RE =
+  /\?\s*$|^\s*(what|which|how|where|who|why|did|do|does|can|could|would|is|are|tell me|remind me what|explain)\b/i;
 
 /**
  * Every group except `vision`, which is attachment-gated (describe_image with
@@ -365,13 +384,35 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
   const said = saidPhrase(prompt, macroNames);
   if (said && !isTeaching(prompt)) {
     const macro = opts.macros?.find((m) => m.name.toLowerCase() === said.toLowerCase());
-    const steps = macro ? macro.steps.map((s, i) => `${i + 1}. ${s.tool}(${Object.entries(s.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`).join(' ') : '';
+    const steps = macro
+      ? macro.steps
+          .map(
+            (s, i) =>
+              `${i + 1}. ${s.tool}(${Object.entries(s.arguments)
+                .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                .join(', ')})`,
+          )
+          .join(' ')
+      : '';
     lines.push(
       `The user mentioned the taught phrase "${said}"${steps ? `, which performs: ${steps}` : ''}. If they are SAYING the phrase, call run_macro with that name; if they are asking ABOUT it, describe those steps. Do not redefine it.`,
     );
   }
   if (opts.relevantFacts && opts.relevantFacts.length > 0) {
-    lines.push(`Facts you remembered earlier that may be relevant: ${opts.relevantFacts.map((f) => `"${f}"`).join('; ')}. Use them to answer directly if they cover the question.`);
+    lines.push(
+      `Facts in memory RIGHT NOW that may be relevant: ${opts.relevantFacts.map((f) => `"${f}"`).join('; ')}. ` +
+        'Memory is the source of truth: if earlier messages in this chat say something different (a fact since forgotten or changed), go by memory. Use these to answer directly if they cover the question.',
+    );
+  }
+  if (
+    (!opts.relevantFacts || opts.relevantFacts.length === 0) &&
+    (opts.categories ?? []).includes('memory') &&
+    /\b(what|which|when|where|who|do you (?:remember|know)|did i)\b/i.test(prompt) &&
+    !/\b(remember|forget|delete|remove)\b.*\b(that|this|my|the)\b/i.test(prompt)
+  ) {
+    lines.push(
+      'Nothing saved in memory matches this question. Say so plainly; do not answer from earlier messages in this chat, since that fact may have been forgotten.',
+    );
   }
   if (opts.origin === 'scheduled') {
     lines.push(
@@ -412,7 +453,9 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
     teachingNow ||
     DEFERRED_RE.test(prompt) ||
     CALENDAR_PLACE_RE.test(prompt) ||
-    /\b(then|and then|after that|before|unless|isn't|is not|that is not|but not|except)\b/i.test(prompt) ||
+    /\b(then|and then|after that|before|unless|isn't|is not|that is not|but not|except)\b/i.test(
+      prompt,
+    ) ||
     prompt.split(/[,;]| and /i).length >= 3;
 
   // ONE system prompt per session. The engine caches the state of the
@@ -429,9 +472,17 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
   // Hiding still happens for `narrowExposure`, the legacy small-window mode.
   let toolGroups: string[];
   if (opts.narrowExposure) {
-    toolGroups = [...routeToolGroups(prompt, macroNames), ...(opts.extraToolGroups ?? []), ...(opts.hasAttachment ? ['vision'] : [])];
+    toolGroups = [
+      ...routeToolGroups(prompt, macroNames),
+      ...(opts.extraToolGroups ?? []),
+      ...(opts.hasAttachment ? ['vision'] : []),
+    ];
   } else {
-    toolGroups = [...ALL_TOOL_GROUPS, ...(opts.extraToolGroups ?? []), ...(opts.hasAttachment ? ['vision'] : [])];
+    toolGroups = [
+      ...ALL_TOOL_GROUPS,
+      ...(opts.extraToolGroups ?? []),
+      ...(opts.hasAttachment ? ['vision'] : []),
+    ];
   }
 
   const denyTools: Record<string, string> = {};
@@ -447,20 +498,24 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
     denyTools[t] = 'Putting something ON THE CALENDAR is calendar_create, never schedule_task.';
   }
   for (const t of teachingToolExclusions(prompt)) {
-    denyTools[t] = 'The user is teaching a phrase. Record it with define_macro; do not run or remember anything now.';
+    denyTools[t] =
+      'The user is teaching a phrase. Record it with define_macro; do not run or remember anything now.';
   }
   for (const t of macroHit?.exclude ?? []) {
-    denyTools[t] = `The user said a phrase they already taught. Call run_macro with that name instead of ${t}.`;
+    denyTools[t] =
+      `The user said a phrase they already taught. Call run_macro with that name instead of ${t}.`;
   }
   if (said && QUESTION_RE.test(prompt)) {
     // Device evidence: "what did I ask you to do when I say wind down?" RAN
     // the phrase. A question about a phrase describes it; it never runs it.
-    denyTools['run_macro'] = `The user is asking ABOUT "${said}", not saying it. Describe its steps instead of running it.`;
+    denyTools['run_macro'] =
+      `The user is asking ABOUT "${said}", not saying it. Describe its steps instead of running it.`;
   }
   if (!teachingNow && !denyTools['define_macro']) {
     // Device evidence: asked what a taught phrase does, the model REDEFINED
     // it with invented steps. Defining is only ever right while teaching.
-    denyTools['define_macro'] = 'The user is not teaching a phrase right now. Answer from what you know; do not define or change any phrase.';
+    denyTools['define_macro'] =
+      'The user is not teaching a phrase right now. Answer from what you know; do not define or change any phrase.';
   }
 
   let allowExecuteOnly: string[] | undefined;
@@ -468,7 +523,9 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
   if (opts.noTools) {
     allowExecuteOnly = [];
     allowExecuteReason = 'Tools are switched off for this message. Answer in plain conversation.';
-    lines.push('Tools are switched off for this message: reply in plain conversation, do not call anything.');
+    lines.push(
+      'Tools are switched off for this message: reply in plain conversation, do not call anything.',
+    );
   } else if (teachingNow) {
     allowExecuteOnly = ['define_macro'];
     allowExecuteReason = 'Record it as a step inside define_macro instead of running it now.';
@@ -477,7 +534,7 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
       allowExecuteOnly = [];
       allowExecuteReason = 'This message needs no tools. Answer in plain conversation.';
       lines.push(
-        'This message needs no tools. Reply in plain conversation; do not call anything. If it turns out to need live or personal data you do not have (weather, news, prices, the user\'s own records), say you would need to look it up rather than guessing.',
+        "This message needs no tools. Reply in plain conversation; do not call anything. If it turns out to need live or personal data you do not have (weather, news, prices, the user's own records), say you would need to look it up rather than guessing.",
       );
     } else {
       const groups = new Set(categoriesToGroups(opts.categories));
@@ -486,12 +543,16 @@ export function composeRun(prompt: string, opts: ComposeOptions = {}): RunCompos
       if (said) groups.add('macro');
       if (opts.hasAttachment) groups.add('vision');
       for (const g of opts.extraToolGroups ?? []) groups.add(g);
-      const allowed = (opts.toolsByGroup ? [...groups].flatMap((g) => opts.toolsByGroup![g] ?? []) : []);
+      const allowed = opts.toolsByGroup
+        ? [...groups].flatMap((g) => opts.toolsByGroup![g] ?? [])
+        : [];
       if (allowed.length > 0) {
         allowExecuteOnly = allowed;
         allowExecuteReason = `That tool is not relevant to this message. Relevant tools: ${allowed.join(', ')}. Use one of those, or answer directly.`;
       }
-      lines.push(`This message is about: ${opts.categories.join(', ')}. Use only tools that serve that, or answer directly.`);
+      lines.push(
+        `This message is about: ${opts.categories.join(', ')}. Use only tools that serve that, or answer directly.`,
+      );
     }
   }
 

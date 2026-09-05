@@ -240,9 +240,14 @@ class MinimusAlarms: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegat
       } else {
         // Prefer the best quality English voice installed (Siri-class
         // "premium"/"enhanced" voices when the user has them).
+        // Among equals, ties used to fall on whatever the list happened to
+        // start with — on one phone that was "Albert", a novelty voice. Prefer
+        // premium/enhanced, then Siri, then Samantha, else the system default.
         let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
-        let ranked = voices.sorted { a, b in a.quality.rawValue > b.quality.rawValue }
-        utterance.voice = ranked.first ?? AVSpeechSynthesisVoice(language: "en-US")
+        let best = voices.filter { $0.quality != .default }.sorted { a, b in a.quality.rawValue > b.quality.rawValue }.first
+        let siri = voices.first { $0.name.lowercased().contains("siri") }
+        let samantha = voices.first { $0.name.lowercased().contains("samantha") }
+        utterance.voice = best ?? siri ?? samantha ?? AVSpeechSynthesisVoice(language: "en-US")
       }
       try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
       try? AVAudioSession.sharedInstance().setActive(true)

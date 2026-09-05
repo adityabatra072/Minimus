@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { ToolContext, ToolDefinition, ToolRegistry } from '@minimus/agent-core';
+import type {
+  ToolContext,
+  ToolDefinition,
+  ToolRegistry,
+} from '@minimus/agent-core';
 
 /**
  * User-taught verbs. "New rule: when I say wind down, dim the screen, kill the
@@ -50,7 +54,9 @@ async function saveMacros(macros: Macro[]): Promise<void> {
 
 /** Settings UI: un-teach a phrase. */
 export async function removeMacro(name: string): Promise<void> {
-  const macros = (await loadMacros()).filter((m) => normalize(m.name) !== normalize(name));
+  const macros = (await loadMacros()).filter(
+    m => normalize(m.name) !== normalize(name),
+  );
   await saveMacros(macros);
 }
 
@@ -71,7 +77,10 @@ export function macroTools(): ToolDefinition[] {
       parameters: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: 'the phrase the user will say, e.g. "wind down"' },
+          name: {
+            type: 'string',
+            description: 'the phrase the user will say, e.g. "wind down"',
+          },
           steps: {
             type: 'array',
             description:
@@ -81,17 +90,24 @@ export function macroTools(): ToolDefinition[] {
         },
         required: ['name', 'steps'],
       },
-      execute: async (args) => {
+      execute: async args => {
         const name = normalize(String(args['name'] ?? ''));
         if (!name) throw new Error('name must not be empty');
         const rawSteps = args['steps'];
         if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
-          throw new Error('steps must be a non-empty array of {"tool", "arguments"} objects');
+          throw new Error(
+            'steps must be a non-empty array of {"tool", "arguments"} objects',
+          );
         }
         const registry = registryRef?.();
         const steps: MacroStep[] = [];
         for (const raw of rawSteps) {
-          const step = raw as { tool?: unknown; name?: unknown; arguments?: unknown; args?: unknown };
+          const step = raw as {
+            tool?: unknown;
+            name?: unknown;
+            arguments?: unknown;
+            args?: unknown;
+          };
           const tool = String(step.tool ?? step.name ?? '').trim();
           if (!tool) throw new Error('each step needs a "tool" name');
           if (registry && !registry.get(tool)) {
@@ -99,37 +115,93 @@ export function macroTools(): ToolDefinition[] {
               `Unknown tool "${tool}" in step. Available tools: ${registry.names().join(', ')}.`,
             );
           }
-          const stepArgs = (step.arguments ?? step.args ?? {}) as Record<string, unknown>;
+          const stepArgs = (step.arguments ?? step.args ?? {}) as Record<
+            string,
+            unknown
+          >;
           steps.push({ tool, arguments: stepArgs });
         }
-        const macros = (await loadMacros()).filter((m) => m.name !== name);
-        macros.push({ name, steps, createdAt: new Date().toISOString().slice(0, 10) });
+        const macros = (await loadMacros()).filter(m => m.name !== name);
+        macros.push({
+          name,
+          steps,
+          createdAt: new Date().toISOString().slice(0, 10),
+        });
         await saveMacros(macros);
         return { ok: true, learned: name, step_count: steps.length };
+      },
+    },
+    {
+      name: 'delete_macro',
+      kind: 'action',
+      group: 'macro',
+      description:
+        'Forget a taught phrase so saying it no longer does anything (the opposite of define_macro).',
+      usageHint:
+        'Use when the user asks to forget, delete or remove a PHRASE they taught ("forget the wind down rule"). Forgetting a saved FACT is forget, not delete_macro.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'the phrase, as taught, e.g. "wind down"',
+          },
+        },
+        required: ['name'],
+      },
+      execute: async args => {
+        const wanted = String(args['name']).trim().toLowerCase();
+        if (!wanted) throw new Error('name must not be empty');
+        const macros = await loadMacros();
+        const hit =
+          macros.find(m => m.name.toLowerCase() === wanted) ??
+          macros.find(
+            m =>
+              m.name.toLowerCase().includes(wanted) ||
+              wanted.includes(m.name.toLowerCase()),
+          );
+        if (!hit)
+          return {
+            ok: false,
+            note: 'No taught phrase with that name.',
+            taught: macros.map(m => m.name),
+          };
+        await removeMacro(hit.name);
+        return {
+          ok: true,
+          forgot_phrase: hit.name,
+          steps_removed: hit.steps.length,
+        };
       },
     },
     {
       name: 'run_macro',
       kind: 'action',
       group: 'macro',
-      description: 'Run a phrase the user taught earlier (performs all of its actions)',
+      description:
+        'Run a phrase the user taught earlier (performs all of its actions)',
       usageHint:
         'If the user says a short phrase they previously taught you, call run_macro with that phrase — do not perform the actions individually.',
       parameters: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: 'the taught phrase, e.g. "wind down"' },
+          name: {
+            type: 'string',
+            description: 'the taught phrase, e.g. "wind down"',
+          },
         },
         required: ['name'],
       },
       execute: async (args, ctx: ToolContext) => {
         const name = normalize(String(args['name'] ?? ''));
         const macros = await loadMacros();
-        const macro = macros.find((m) => m.name === name);
+        const macro = macros.find(m => m.name === name);
         if (!macro) {
-          const known = macros.map((m) => m.name).join(', ');
+          const known = macros.map(m => m.name).join(', ');
           throw new Error(
-            known ? `No macro called "${name}". Known: ${known}.` : 'No macros have been taught yet.',
+            known
+              ? `No macro called "${name}". Known: ${known}.`
+              : 'No macros have been taught yet.',
           );
         }
         const registry = registryRef?.();
@@ -138,7 +210,11 @@ export function macroTools(): ToolDefinition[] {
         for (const step of macro.steps) {
           const tool = registry.get(step.tool);
           if (!tool) {
-            performed.push({ tool: step.tool, ok: false, detail: 'tool not available' });
+            performed.push({
+              tool: step.tool,
+              ok: false,
+              detail: 'tool not available',
+            });
             continue;
           }
           // Replay executes tools directly, which means it does not pass the
@@ -146,11 +222,18 @@ export function macroTools(): ToolDefinition[] {
           // on the user's behalf. A taught phrase must not become the way
           // around that gate: "when I say goodnight, text my wife" would fire
           // silently. Refuse the step and say so.
-          if (registry.requiresApproval({ id: 'macro', name: step.tool, arguments: step.arguments })) {
+          if (
+            registry.requiresApproval({
+              id: 'macro',
+              name: step.tool,
+              arguments: step.arguments,
+            })
+          ) {
             performed.push({
               tool: step.tool,
               ok: false,
-              detail: 'needs your confirmation, so it cannot run inside a taught phrase',
+              detail:
+                'needs your confirmation, so it cannot run inside a taught phrase',
             });
             continue;
           }

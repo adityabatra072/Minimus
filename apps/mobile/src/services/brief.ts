@@ -29,7 +29,30 @@ export async function setDailyBrief(hhmm: string): Promise<void> {
   if (!hhmm) return;
   const at = nextOccurrence(hhmm);
   if (!at) return;
-  const task = await scheduler.schedule(BRIEF_INSTRUCTION, at, { repeat: 'daily', tag: BRIEF_TAG });
-  const mod = (NativeModules as Record<string, { notifyAt?: (at: number, t: string, b: string | null, id: string | null) => Promise<string> } | undefined>)['MinimusTools'];
-  void mod?.notifyAt?.(at, 'Your morning brief is ready', 'Open Minimus to hear about your day.', `task-${task.id}`).catch(() => undefined);
+  const task = await scheduler.schedule(BRIEF_INSTRUCTION, at, {
+    repeat: 'daily',
+    tag: BRIEF_TAG,
+  });
+  const mod = (
+    NativeModules as Record<
+      string,
+      | {
+          notifyAt?: (
+            at: number,
+            t: string,
+            b: string | null,
+            id: string | null,
+          ) => Promise<string>;
+        }
+      | undefined
+    >
+  )['MinimusTools'];
+  void mod
+    ?.notifyAt?.(
+      at,
+      'Your morning brief is ready',
+      'Open Minimus to hear about your day.',
+      `task-${task.id}`,
+    )
+    .catch(() => undefined);
 }

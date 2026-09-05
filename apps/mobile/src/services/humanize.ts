@@ -69,6 +69,10 @@ export function verbFor(call: ToolCall): string {
       return 'Running code';
     case 'remember':
       return 'Saving to memory';
+    case 'delete_macro':
+      return `Forgetting the phrase “${str(a['name'], '…')}”`;
+    case 'forget':
+      return a['all'] === true ? 'Forgetting everything' : `Forgetting ${str(a['about'], '…')}`;
     case 'recall':
       return `Searching memory for “${str(a['query'], '…')}”`;
     default:
@@ -153,6 +157,12 @@ export function resultFor(call: ToolCall, resultJson: string, isError: boolean):
       return r['now_playing'] ? `Playing ${str(r['now_playing'])}` : 'Opened in Spotify';
     case 'remember':
       return 'Saved on this phone';
+    case 'delete_macro':
+      return r['ok'] === true ? `Phrase “${str(r['forgot_phrase'])}” forgotten` : 'No such phrase';
+    case 'forget': {
+      const forgot = Array.isArray(r['forgot']) ? r['forgot'] : [];
+      return forgot.length === 0 ? 'Nothing matched' : forgot.length === 1 ? `Forgot “${String(forgot[0]).slice(0, 60)}”` : `Forgot ${forgot.length} facts`;
+    }
     case 'recall': {
       const matches = Array.isArray(r['matches']) ? r['matches'].length : 0;
       return matches > 0 ? `${matches} memory match${matches === 1 ? '' : 'es'}` : 'Nothing saved yet';
